@@ -3,55 +3,67 @@ import pandas as pd
 from streamlit_gsheets import GSheetsConnection
 import googlemaps
 
-# --- INICIALIZAÇÃO ---
+# --- INICIALIZAÇÃO DE SEGURANÇA ---
 if 'logado' not in st.session_state:
     st.session_state.logado = False
 if 'usuario_atual' not in st.session_state:
     st.session_state.usuario_atual = ""
 
-st.set_page_config(page_title="Renove - Diagnóstico de Login", layout="wide")
+st.set_page_config(page_title="Renove - Gestão de Rotas", layout="wide")
 
-# Conexão direta usando a URL do Secrets
-conn = st.connection("gsheets", type=GSheetsConnection)
-url_planilha = st.secrets["connections"]["gsheets"]["spreadsheet"]
+# Conexões
+try:
+    API_KEY = st.secrets["GOOGLE_MAPS_API_KEY"]
+    gmaps = googlemaps.Client(key=API_KEY)
+    conn = st.connection("gsheets", type=GSheetsConnection)
+    url_p = st.secrets["connections"]["gsheets"]["spreadsheet"]
+except Exception as e:
+    st.error("Erro na configuração do Secrets.")
+    st.stop()
 
-# --- LOGIN COM DIAGNÓSTICO ---
+# --- LOGIN ---
 if not st.session_state.logado:
     st.title("🔐 Acesso Administrativo - Renove")
-    
-    u_input = st.text_input("Usuário").strip().lower()
-    p_input = st.text_input("Senha", type="password")
+    u_in = st.text_input("Usuário").strip().lower()
+    p_in = st.text_input("Senha", type="password")
     
     if st.button("Entrar"):
         try:
-            # Tenta ler a aba 'usuarios' de forma direta
-            df_u = conn.read(spreadsheet=url_planilha, worksheet="usuarios", ttl="0")
-            
-            # Limpeza radical de colunas (remove espaços e acentos invisíveis)
-            df_u.columns = [str(c).strip().upper().replace('Á', 'A') for c in df_u.columns]
+            # Leitura direta da aba 'usuarios'
+            df_u = conn.read(spreadsheet=url_p, worksheet="usuarios", ttl="0")
+            df_u.columns = [str(c).strip().upper() for c in df_u.columns]
             
             if 'USUARIO' in df_u.columns and 'SENHA' in df_u.columns:
-                df_u['USUARIO'] = df_u['USUARIO'].astype(str).str.strip().str.lower()
-                df_u['SENHA'] = df_u['SENHA'].astype(str).str.strip()
-                
-                validar = df_u[(df_u['USUARIO'] == u_input) & (df_u['SENHA'] == str(p_input))]
+                # Compara os dados da planilha com o que foi digitado
+                validar = df_u[(df_u['USUARIO'].astype(str).str.lower() == u_in) & 
+                              (df_u['SENHA'].astype(str) == str(p_in))]
                 
                 if not validar.empty:
                     st.session_state.logado = True
-                    st.session_state.usuario_atual = u_input
+                    st.session_state.usuario_atual = u_in
                     st.rerun()
                 else:
-                    st.error("Usuário ou senha não encontrados na lista.")
+                    st.error("Usuário ou senha incorretos.")
             else:
-                st.error(f"Erro: Colunas detectadas: {list(df_u.columns)}. Verifique a primeira linha da aba 'usuarios'.")
-        
-        except Exception as e:
-            st.error(f"O Google não encontrou a aba 'usuarios'.")
-            st.info("💡 Dica: Verifique se o nome da aba lá embaixo na planilha não tem um ESPAÇO no final (ex: 'usuarios ').")
+                st.error("Estrutura da aba 'usuarios' incorreta (precisa de USUARIO e SENHA).")
+        except Exception:
+            st.error("O Google não conseguiu ler a aba 'usuarios'. Verifique o compartilhamento.")
     st.stop()
 
-# --- ÁREA LOGADA (Apenas para teste) ---
-st.success(f"Bem-vindo, {st.session_state.usuario_atual}!")
+# --- ÁREA LOGADA ---
+st.sidebar.subheader(f"👤 {st.session_state.usuario_atual.upper()}")
 if st.sidebar.button("Sair"):
     st.session_state.logado = False
     st.rerun()
+
+menu = st.sidebar.radio("Navegação", ["📍 Gerenciar Locais", "🚚 Criar Rota Inteligente"])
+
+if menu == "📍 Gerenciar Locais":
+    st.header("Gestão de Condomínios")
+    df_l = conn.read(spreadsheet=url_p, worksheet="locais", ttl="0")
+    st.dataframe(df_l, use_container_width=True)
+    # Aqui continuam suas funções de cadastrar/editar/excluir
+
+elif menu == "🚚 Criar Rota Inteligente":
+    st.header("Otimização de Trajeto")
+    # Aqui continua sua lógica de rotas que já funciona
