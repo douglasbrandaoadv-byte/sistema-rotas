@@ -3,35 +3,19 @@ import pandas as pd
 from streamlit_gsheets import GSheetsConnection
 import googlemaps
 
-# --- INICIALIZAÇÃO SEGURA ---
+# --- INICIALIZAÇÃO ---
 if 'logado' not in st.session_state:
     st.session_state.logado = False
 if 'usuario_atual' not in st.session_state:
     st.session_state.usuario_atual = ""
 
-st.set_page_config(page_title="Sistema Renove - Gestão de Rotas", layout="wide")
+st.set_page_config(page_title="Renove - Diagnóstico de Login", layout="wide")
 
-# Conexões
-try:
-    API_KEY = st.secrets["GOOGLE_MAPS_API_KEY"]
-    gmaps = googlemaps.Client(key=API_KEY)
-    conn = st.connection("gsheets", type=GSheetsConnection)
-except Exception as e:
-    st.error("Erro nas chaves de segurança no Secrets.")
-    st.stop()
+# Conexão direta usando a URL do Secrets
+conn = st.connection("gsheets", type=GSheetsConnection)
+url_planilha = st.secrets["connections"]["gsheets"]["spreadsheet"]
 
-# Função Robusta para buscar dados
-def buscar_dados_aba(nome_aba):
-    try:
-        df = conn.read(worksheet=nome_aba, ttl="0")
-        # Limpa os nomes das colunas: remove espaços e deixa em MAIÚSCULO
-        df.columns = [str(c).strip().upper() for c in df.columns]
-        return df
-    except Exception as e:
-        st.error(f"Não foi possível ler a aba '{nome_aba}'. Verifique se o nome na planilha está idêntico.")
-        return pd.DataFrame()
-
-# --- LOGIN ---
+# --- LOGIN COM DIAGNÓSTICO ---
 if not st.session_state.logado:
     st.title("🔐 Acesso Administrativo - Renove")
     
@@ -39,33 +23,35 @@ if not st.session_state.logado:
     p_input = st.text_input("Senha", type="password")
     
     if st.button("Entrar"):
-        df_u = buscar_dados_aba("usuarios")
-        
-        if not df_u.empty and 'USUARIO' in df_u.columns and 'SENHA' in df_u.columns:
-            # Converte tudo para string para comparar sem erro
-            df_u['USUARIO'] = df_u['USUARIO'].astype(str).str.strip().str.lower()
-            df_u['SENHA'] = df_u['SENHA'].astype(str).str.strip()
+        try:
+            # Tenta ler a aba 'usuarios' de forma direta
+            df_u = conn.read(spreadsheet=url_planilha, worksheet="usuarios", ttl="0")
             
-            validar = df_u[(df_u['USUARIO'] == u_input) & (df_u['SENHA'] == str(p_input))]
+            # Limpeza radical de colunas (remove espaços e acentos invisíveis)
+            df_u.columns = [str(c).strip().upper().replace('Á', 'A') for c in df_u.columns]
             
-            if not validar.empty:
-                st.session_state.logado = True
-                st.session_state.usuario_atual = u_input
-                st.rerun()
+            if 'USUARIO' in df_u.columns and 'SENHA' in df_u.columns:
+                df_u['USUARIO'] = df_u['USUARIO'].astype(str).str.strip().str.lower()
+                df_u['SENHA'] = df_u['SENHA'].astype(str).str.strip()
+                
+                validar = df_u[(df_u['USUARIO'] == u_input) & (df_u['SENHA'] == str(p_input))]
+                
+                if not validar.empty:
+                    st.session_state.logado = True
+                    st.session_state.usuario_atual = u_input
+                    st.rerun()
+                else:
+                    st.error("Usuário ou senha não encontrados na lista.")
             else:
-                st.error("Usuário ou senha incorretos.")
-        else:
-            st.error("Erro na estrutura da aba 'usuarios'. Verifique os títulos USUARIO e SENHA.")
-            # Debug para você ver o que o sistema está lendo (ajuda a identificar o erro)
-            if not df_u.empty:
-                st.write("Colunas detectadas pelo sistema:", list(df_u.columns))
+                st.error(f"Erro: Colunas detectadas: {list(df_u.columns)}. Verifique a primeira linha da aba 'usuarios'.")
+        
+        except Exception as e:
+            st.error(f"O Google não encontrou a aba 'usuarios'.")
+            st.info("💡 Dica: Verifique se o nome da aba lá embaixo na planilha não tem um ESPAÇO no final (ex: 'usuarios ').")
     st.stop()
 
-# --- INTERFACE APÓS LOGIN (Mantém o restante do seu código) ---
-st.sidebar.subheader(f"👤 {st.session_state.usuario_atual.upper()}")
+# --- ÁREA LOGADA (Apenas para teste) ---
+st.success(f"Bem-vindo, {st.session_state.usuario_atual}!")
 if st.sidebar.button("Sair"):
     st.session_state.logado = False
     st.rerun()
-
-menu = st.sidebar.radio("Menu", ["📍 Locais", "🚚 Rotas Inteligentes"])
-# ... restante do código de gestão e rotas
