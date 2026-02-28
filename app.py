@@ -3,96 +3,79 @@ import pandas as pd
 from streamlit_gsheets import GSheetsConnection
 import googlemaps
 
-# --- 1. CONFIGURAÇÃO E SEGURANÇA ---
-st.set_page_config(page_title="Renove Administradora - João Pessoa", layout="wide")
+# --- 1. CONFIGURAÇÃO ---
+st.set_page_config(page_title="Sistema Renove - Rota Simplificada", layout="wide")
 
-# Inicializa variáveis para evitar erros de 'AttributeError'
 if 'logado' not in st.session_state:
     st.session_state.logado = False
-if 'usuario_atual' not in st.session_state:
-    st.session_state.usuario_atual = ""
 
-# Conexões
+# Conexões Seguras
 try:
     API_KEY = st.secrets["GOOGLE_MAPS_API_KEY"]
     gmaps = googlemaps.Client(key=API_KEY)
     conn = st.connection("gsheets", type=GSheetsConnection)
-    # Extraímos o ID da planilha do seu link
     SHEET_URL = st.secrets["connections"]["gsheets"]["spreadsheet"]
 except Exception:
-    st.error("Erro na configuração do 'Secrets'. Verifique se as chaves estão corretas.")
+    st.error("Erro no 'Secrets'. Verifique se as chaves estão corretas.")
     st.stop()
 
-# --- 2. FUNÇÃO DE LEITURA À PROVA DE ERROS ---
-def ler_aba(nome_aba):
-    try:
-        # Este método é o mais eficiente para ler abas específicas via URL pública
-        # Ele converte o nome da aba diretamente para o formato que o Google entende melhor
-        url_direta = f"{SHEET_URL.split('/edit')[0]}/gviz/tq?tqx=out:csv&sheet={nome_aba}"
-        df = pd.read_csv(url_direta)
-        df.columns = [str(c).strip().upper() for c in df.columns]
-        return df
-    except Exception as e:
-        st.error(f"Erro crítico ao ler a aba '{nome_aba}': {e}")
-        return pd.DataFrame()
-
-# --- 3. TELA DE LOGIN ---
+# --- 2. LOGIN SIMPLIFICADO (Sem depender da planilha) ---
 if not st.session_state.logado:
     st.title("🔐 Acesso Administrativo - Renove")
-    
-    with st.container():
-        u_in = st.text_input("Usuário").strip().lower()
-        p_in = st.text_input("Senha", type="password")
-        
-        if st.button("Entrar no Sistema"):
-            with st.spinner("Validando acesso..."):
-                df_u = ler_aba("usuarios")
-                
-                if not df_u.empty and 'USUARIO' in df_u.columns:
-                    # Compara usuário e senha (8834 para o douglas)
-                    validar = df_u[(df_u['USUARIO'].astype(str).str.lower() == u_in) & 
-                                  (df_u['SENHA'].astype(str) == str(p_in))]
-                    
-                    if not validar.empty:
-                        st.session_state.logado = True
-                        st.session_state.usuario_atual = u_in
-                        st.rerun()
-                    else:
-                        st.error("Usuário ou senha incorretos na planilha.")
-                else:
-                    st.warning("Não foi possível acessar a lista de usuários.")
+    # Senha fixa para evitar erros de conexão com abas de usuários
+    senha_acesso = st.text_input("Digite a Senha de Acesso", type="password")
+    if st.button("Entrar"):
+        if senha_acesso == "admin123": # Você pode mudar essa senha aqui no código
+            st.session_state.logado = True
+            st.rerun()
+        else:
+            st.error("Senha incorreta.")
     st.stop()
 
-# --- 4. INTERFACE PRINCIPAL (SÓ APARECE APÓS LOGIN) ---
-st.sidebar.markdown(f"👤 Logado: **{st.session_state.usuario_atual.upper()}**")
-if st.sidebar.button("Sair"):
-    st.session_state.logado = False
-    st.rerun()
+# --- 3. FUNÇÃO DE LEITURA (Apenas Locais) ---
+def buscar_locais():
+    try:
+        # Lê a planilha focando na aba 'locais'
+        df = conn.read(spreadsheet=SHEET_URL, worksheet="locais", ttl="0")
+        df.columns = [str(c).strip().upper() for c in df.columns]
+        return df
+    except Exception:
+        # Se falhar a aba específica, tenta ler a planilha geral
+        return conn.read(spreadsheet=SHEET_URL, ttl="0")
 
-menu = st.sidebar.radio("Navegação", ["🚚 Rotas e Diligências", "📍 Gestão de Locais", "👥 Equipe"])
+# --- 4. INTERFACE PRINCIPAL ---
+st.sidebar.button("Sair", on_click=lambda: st.session_state.update({"logado": False}))
+menu = st.sidebar.radio("Navegação", ["📍 Gerenciar Condomínios", "🚚 Gerar Rota"])
 
-# --- ABA DE ROTAS (FUNCIONALIDADE PRINCIPAL) ---
-if menu == "🚚 Rotas e Diligências":
-    st.header("Otimização de Trajeto - Renove")
-    df_l = ler_aba("locais")
+if menu == "📍 Gerenciar Condomínios":
+    st.header("Gestão de Endereços - João Pessoa")
+    df = buscar_locais()
     
-    if not df_l.empty:
-        qtd = st.number_input("Quantas paradas hoje?", min_value=1, step=1)
-        # Lógica de rotas para condomínios como Villa Imperial e Mardisa Design
-        # (O seu código de rotas que já funcionava entra aqui)
-        st.info("Selecione os destinos e gere o mapa para o motoboy.")
-    else:
-        st.error("Nenhum condomínio cadastrado na aba 'locais'.")
+    t1, t2 = st.tabs(["➕ Cadastrar", "⚙️ Editar/Excluir"])
+    
+    with t1:
+        with st.form("novo"):
+            c1, c2 = st.columns(2)
+            nome = c1.text_input("NOME")
+            rua = c2.text_input("RUA")
+            num = c1.text_input("NÚMERO")
+            bair = c2.text_input("BAIRRO")
+            if st.form_submit_button("Salvar na Nuvem"):
+                novo_df = pd.DataFrame([[nome, rua, num, bair, "João Pessoa", "PB"]], columns=df.columns)
+                df_final = pd.concat([df, novo_df], ignore_index=True)
+                conn.update(spreadsheet=SHEET_URL, worksheet="locais", data=df_final)
+                st.success("Salvo!")
+                st.rerun()
 
-# --- ABA DE GESTÃO DE LOCAIS ---
-elif menu == "📍 Gestão de Locais":
-    st.header("Cadastro de Condomínios")
-    df_l = ler_aba("locais")
-    # Interface de edição/exclusão que você já usa
-    st.dataframe(df_l, use_container_width=True)
+    with t2:
+        if not df.empty:
+            sel = st.selectbox("Selecione para alterar:", df['NOME'].tolist())
+            # Interface de edição aqui...
+    
+    st.dataframe(df, use_container_width=True)
 
-# --- ABA DE EQUIPE ---
-elif menu == "👥 Equipe":
-    st.header("Gestão de Usuários")
-    df_u = ler_aba("usuarios")
-    st.table(df_u[['USUARIO']])
+elif menu == "🚚 Gerar Rota":
+    st.header("Itinerário para o Motoboy")
+    df_l = buscar_locais()
+    # Lógica de rotas que já estava funcionando...
+    st.info("Selecione os destinos cadastrados para otimizar o trajeto.")
