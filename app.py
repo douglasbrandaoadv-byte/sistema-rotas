@@ -1,121 +1,98 @@
 import streamlit as st
 import pandas as pd
 from streamlit_gsheets import GSheetsConnection
-from geopy.geocoders import Nominatim
-from geopy.distance import geodesic
+import googlemaps
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Rota Express - Administradora", layout="wide")
+st.set_page_config(page_title="Rota Inteligente - Administradora", layout="wide")
 
-# --- CONEXÃO COM GOOGLE SHEETS ---
+# Conexão com as Chaves de Segurança
+API_KEY = st.secrets["GOOGLE_MAPS_API_KEY"]
+gmaps = googlemaps.Client(key=API_KEY)
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def buscar_dados():
     return conn.read(ttl="0")
 
-# --- LOGIN ---
+# --- SISTEMA DE LOGIN ---
 if 'logado' not in st.session_state:
     st.session_state.logado = False
 
 if not st.session_state.logado:
-    st.title("🔐 Acesso ao Sistema de Rotas")
-    usuario = st.text_input("Usuário")
-    senha = st.text_input("Senha", type="password")
-    if st.button("Entrar"):
-        if usuario == "admin" and senha == "admin123":
+    st.title("🔐 Acesso Restrito")
+    if st.text_input("Senha", type="password") == "admin123":
+        if st.button("Entrar"):
             st.session_state.logado = True
             st.rerun()
-        else:
-            st.error("Credenciais inválidas")
     st.stop()
 
-# --- MENU LATERAL ---
-menu = st.sidebar.radio("Navegação", ["Cadastrar Locais", "Criar Rota"])
+# --- MENU ---
+aba = st.sidebar.radio("Navegação", ["📍 Cadastrar Locais", "🚚 Criar Rota Inteligente"])
 
-# --- 1. ABA DE CADASTRO ---
-if menu == "Cadastrar Locais":
-    st.header("📍 Cadastro de Estabelecimentos")
+if aba == "📍 Cadastrar Locais":
+    st.header("Cadastro de Estabelecimentos")
     df_existente = buscar_dados()
-
-    aba_ind, aba_lote = st.tabs(["Cadastro Individual", "Cadastro em Lote"])
-
-    with aba_ind:
-        with st.form("form_cadastro"):
-            c1, c2 = st.columns(2)
-            nome = c1.text_input("NOME DO ESTABELECIMENTO")
-            rua = c2.text_input("RUA")
-            num = c1.text_input("NÚMERO")
-            bairro = c2.text_input("BAIRRO")
-            cidade = c1.text_input("CIDADE")
-            estado = c2.text_input("ESTADO", value="PB")
-            
-            if st.form_submit_button("Salvar Local"):
-                novo_item = pd.DataFrame([[nome, rua, num, bairro, cidade, estado]], 
-                                        columns=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"])
-                df_final = pd.concat([df_existente, novo_item], ignore_index=True)
-                conn.update(data=df_final)
-                st.success("Cadastrado com sucesso!")
-                st.rerun()
-
-    with aba_lote:
-        arquivo = st.file_uploader("Suba um arquivo CSV com as colunas: NOME, RUA, NUMERO, BAIRRO, CIDADE, ESTADO", type="csv")
-        if arquivo:
-            df_lote = pd.read_csv(arquivo)
-            if st.button("Confirmar Carga em Lote"):
-                df_final = pd.concat([df_existente, df_lote], ignore_index=True)
-                conn.update(data=df_final)
-                st.success("Lote importado!")
-                st.rerun()
-
-    st.subheader("Locais na Base de Dados")
+    
+    with st.form("form_novo"):
+        c1, c2 = st.columns(2)
+        nome = c1.text_input("NOME DO LOCAL")
+        rua = c2.text_input("RUA")
+        num = c1.text_input("NÚMERO")
+        bairro = c2.text_input("BAIRRO")
+        cidade = c1.text_input("CIDADE")
+        estado = c2.text_input("ESTADO", value="PB")
+        
+        if st.form_submit_button("Salvar Local"):
+            novo = pd.DataFrame([[nome, rua, num, bairro, cidade, estado]], 
+                               columns=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"])
+            df_final = pd.concat([df_existente, novo], ignore_index=True)
+            conn.update(data=df_final)
+            st.success("Cadastrado na nuvem!")
+            st.rerun()
     st.dataframe(df_existente)
 
-# --- 2. ABA DE CRIAR ROTA ---
-elif menu == "Criar Rota":
-    st.header("🛣️ Elaborar Rota Econômica")
+elif aba == "🚚 Criar Rota Inteligente":
+    st.header("Gerar Itinerário Económico")
     df_locais = buscar_dados()
-
+    
     if df_locais.empty:
         st.warning("Cadastre locais primeiro.")
-        st.stop()
-
-    qtd = st.number_input("Quantidade de estabelecimentos na rota:", min_value=1, step=1)
-    
-    lista_missao = ["ENTREGA DE BOLETOS", "ENTREGA DE NOTIFICAÇÃO", "ENTREGA DE FOLHA DE PAGAMENTO", 
-                    "REGISTRO DE ATAS", "RECOLHER ATAS", "RECOLHER DOCUMENTOS"]
-    
-    selecionados = []
-    for i in range(int(qtd)):
-        st.markdown(f"**Parada {i+1}**")
-        col1, col2, col3 = st.columns([2, 2, 2])
-        nome_sel = col1.selectbox(f"Local", df_locais['NOME'].unique(), key=f"n_{i}")
-        missao_sel = col2.selectbox(f"Missão", lista_missao, key=f"m_{i}")
-        obs_sel = col3.text_input(f"Observação", key=f"o_{i}")
+    else:
+        qtd = st.number_input("Quantos destinos hoje?", min_value=1, step=1)
+        missoes = ["ENTREGA DE BOLETOS", "ENTREGA DE NOTIFICAÇÃO", "ENTREGA DE FOLHA DE PAGAMENTO", "REGISTRO DE ATAS", "RECOLHER ATAS", "RECOLHER DOCUMENTOS"]
         
-        # Puxa endereço completo
-        row = df_locais[df_locais['NOME'] == nome_sel].iloc[0]
-        endereco_texto = f"{row['RUA']}, {row['NUMERO']}, {row['BAIRRO']}, {row['CIDADE']}, {row['ESTADO']}"
-        selecionados.append({"NOME": nome_sel, "ENDERECO": endereco_texto, "MISSAO": missao_sel, "OBS": obs_sel})
-
-    st.divider()
-    st.subheader("Início da Jornada")
-    ponto_partida = st.text_input("Endereço de Início do Motoboy (Ex: Rua Duque de Caxias, 100, Centro, João Pessoa, PB)")
-
-    if st.button("🚀 Gerar Rota Mais Econômica"):
-        with st.spinner("Calculando distâncias..."):
-            # Lógica de Otimização (Simulada por proximidade de texto/ordem para este exemplo inicial)
-            # Para otimização real de GPS, usaríamos coordenadas Latitude/Longitude aqui.
-            st.success("Rota Otimizada Gerada!")
+        selecionados = []
+        for i in range(int(qtd)):
+            col1, col2, col3 = st.columns(3)
+            nome_sel = col1.selectbox(f"Local {i+1}", df_locais['NOME'].unique(), key=f"l_{i}")
+            missao_sel = col2.selectbox(f"Missão", missoes, key=f"m_{i}")
+            obs = col3.text_input("Observação", key=f"o_{i}")
             
+            row = df_locais[df_locais['NOME'] == nome_sel].iloc[0]
+            endereco = f"{row['RUA']}, {row['NUMERO']}, {row['BAIRRO']}, {row['CIDADE']}, {row['ESTADO']}"
+            selecionados.append({"nome": nome_sel, "endereco": endereco, "missao": missao_sel, "obs": obs})
+
+        st.subheader("Ponto de Partida")
+        partida = st.text_input("De onde o motoboy está saindo?")
+
+        if st.button("🚀 Gerar Melhor Rota"):
+            enderecos_lista = [s['endereco'] for s in selecionados]
+            
+            # O Google Maps calcula a ordem mais rápida (optimize_waypoints=True)
+            resultado = gmaps.directions(partida, enderecos_lista[-1], waypoints=enderecos_lista[:-1], optimize_waypoints=True)
+            
+            ordem_otimizada = resultado[0]['waypoint_order']
+            
+            st.success("Rota calculada com a sequência mais curta!")
+            
+            # Gerar link para o Google Maps do telemóvel
+            link_final = f"https://www.google.com/maps/dir/{partida}/" + "/".join([selecionados[i]['endereco'] for i in ordem_otimizada])
+            st.link_button("📱 Abrir Rota no GPS do Motoboy", link_final)
+
             st.subheader("📋 Relatório de Entrega")
-            df_rota = pd.DataFrame(selecionados)
-            
-            for idx, r in df_rota.iterrows():
-                with st.container():
-                    st.markdown(f"**{idx+1}º Destino: {r['NOME']}**")
-                    st.write(f"📍 Endereço: {r['ENDERECO']}")
-                    st.write(f"🎯 Missão: {r['MISSAO']}")
-                    st.write(f"📝 Obs: {r['OBS']}")
-                    st.divider()
-            
-            st.button("Imprimir Relatório")
+            for i, idx_original in enumerate(ordem_otimizada):
+                item = selecionados[idx_original]
+                st.markdown(f"**{i+1}ª Parada: {item['nome']}**")
+                st.write(f"📍 {item['endereco']}")
+                st.write(f"🎯 Missão: {item['missao']} | 📝 Obs: {item['obs']}")
+                st.divider()
