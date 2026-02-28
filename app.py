@@ -12,6 +12,7 @@ gmaps = googlemaps.Client(key=API_KEY)
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def buscar_dados():
+    # ttl="0" garante que ele sempre pegue o dado mais atual da planilha
     return conn.read(ttl="0")
 
 # --- SISTEMA DE LOGIN ---
@@ -20,43 +21,92 @@ if 'logado' not in st.session_state:
 
 if not st.session_state.logado:
     st.title("🔐 Acesso Restrito - Renove Administradora")
-    if st.text_input("Senha", type="password") == "admin123":
-        if st.button("Entrar"):
+    senha = st.text_input("Senha do Sistema", type="password")
+    if st.button("Entrar"):
+        if senha == "admin123":
             st.session_state.logado = True
             st.rerun()
     st.stop()
 
 # --- MENU ---
-aba = st.sidebar.radio("Navegação", ["📍 Cadastrar Locais", "🚚 Criar Rota Inteligente"])
+aba = st.sidebar.radio("Navegação", ["📍 Cadastrar e Gerenciar", "🚚 Criar Rota Inteligente"])
 
-if aba == "📍 Cadastrar Locais":
-    st.header("Cadastro de Condomínios e Estabelecimentos")
+# --- 1. ABA DE CADASTRO E GERENCIAMENTO ---
+if aba == "📍 Cadastrar e Gerenciar":
+    st.header("Gestão de Condomínios e Estabelecimentos")
     df_existente = buscar_dados()
     
-    with st.form("form_novo"):
-        c1, c2 = st.columns(2)
-        nome = c1.text_input("NOME DO LOCAL")
-        rua = c2.text_input("RUA")
-        num = c1.text_input("NÚMERO")
-        bairro = c2.text_input("BAIRRO")
-        cidade = c1.text_input("CIDADE", value="João Pessoa")
-        estado = c2.text_input("ESTADO", value="PB")
-        
-        if st.form_submit_button("Salvar Local"):
-            novo = pd.DataFrame([[nome, rua, num, bairro, cidade, estado]], 
-                               columns=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"])
-            df_final = pd.concat([df_existente, novo], ignore_index=True)
-            conn.update(data=df_final)
-            st.success("Condomínio cadastrado na nuvem!")
-            st.rerun()
+    aba_cad, aba_edit = st.tabs(["➕ Novo Cadastro", "⚙️ Editar ou Excluir"])
+
+    # SUB-ABA: CADASTRAR NOVO
+    with aba_cad:
+        with st.form("form_novo"):
+            st.subheader("Cadastrar Novo Local")
+            c1, c2 = st.columns(2)
+            nome = c1.text_input("NOME DO LOCAL")
+            rua = c2.text_input("RUA")
+            num = c1.text_input("NÚMERO")
+            bairro = c2.text_input("BAIRRO")
+            cidade = c1.text_input("CIDADE", value="João Pessoa")
+            estado = c2.text_input("ESTADO", value="PB")
+            
+            if st.form_submit_button("Salvar Local"):
+                novo = pd.DataFrame([[nome, rua, num, bairro, cidade, estado]], 
+                                   columns=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"])
+                df_final = pd.concat([df_existente, novo], ignore_index=True)
+                conn.update(data=df_final)
+                st.success(f"'{nome}' cadastrado com sucesso!")
+                st.rerun()
+
+    # SUB-ABA: EDITAR OU EXCLUIR
+    with aba_edit:
+        if df_existente.empty:
+            st.info("Não há locais cadastrados para gerenciar.")
+        else:
+            st.subheader("Selecione um local para modificar")
+            # Cria uma lista de nomes para escolher
+            opcao_sel = st.selectbox("Escolha o estabelecimento:", df_existente['NOME'].tolist())
+            
+            # Localiza os dados atuais desse estabelecimento
+            dados_atuais = df_existente[df_existente['NOME'] == opcao_sel].iloc[0]
+            indice_original = df_existente[df_existente['NOME'] == opcao_sel].index[0]
+
+            with st.form("form_edicao"):
+                c1, c2 = st.columns(2)
+                novo_nome = c1.text_input("NOME", value=dados_atuais['NOME'])
+                nova_rua = c2.text_input("RUA", value=dados_atuais['RUA'])
+                novo_num = c1.text_input("NÚMERO", value=dados_atuais['NUMERO'])
+                novo_bairro = c2.text_input("BAIRRO", value=dados_atuais['BAIRRO'])
+                nova_cidade = c1.text_input("CIDADE", value=dados_atuais['CIDADE'])
+                novo_estado = c2.text_input("ESTADO", value=dados_atuais['ESTADO'])
+                
+                col_btn_edit, col_btn_del = st.columns(2)
+                
+                # BOTÃO ATUALIZAR
+                if col_btn_edit.form_submit_button("✅ Salvar Alterações"):
+                    df_existente.loc[indice_original] = [novo_nome, nova_rua, novo_num, novo_bairro, nova_cidade, novo_estado]
+                    conn.update(data=df_existente)
+                    st.success("Informações atualizadas!")
+                    st.rerun()
+                
+                # BOTÃO EXCLUIR
+                if col_btn_del.form_submit_button("🗑️ Excluir Cadastro"):
+                    df_novo = df_existente.drop(indice_original)
+                    conn.update(data=df_novo)
+                    st.warning(f"'{opcao_sel}' foi removido do sistema.")
+                    st.rerun()
+
+    st.divider()
+    st.subheader("Visualizar Todos os Locais")
     st.dataframe(df_existente)
 
+# --- 2. ABA DE CRIAR ROTA ---
 elif aba == "🚚 Criar Rota Inteligente":
     st.header("Gerar Itinerário Econômico")
     df_locais = buscar_dados()
     
     if df_locais.empty:
-        st.warning("Cadastre os condomínios primeiro.")
+        st.warning("Cadastre os locais primeiro.")
     else:
         qtd = st.number_input("Quantos destinos hoje?", min_value=1, step=1)
         missoes = ["ENTREGA DE BOLETOS", "ENTREGA DE NOTIFICAÇÃO", "ENTREGA DE FOLHA DE PAGAMENTO", "REGISTRO DE ATAS", "RECOLHER ATAS", "RECOLHER DOCUMENTOS"]
@@ -77,33 +127,19 @@ elif aba == "🚚 Criar Rota Inteligente":
         partida = st.text_input("De onde o motoboy está saindo?", value="Rua Rodrigues de Aquino, 267, Centro, João Pessoa, PB")
 
         if st.button("🚀 Gerar Melhor Rota"):
-            with st.spinner("Calculando o melhor trajeto..."):
+            with st.spinner("Otimizando trajeto..."):
                 enderecos_lista = [s['endereco'] for s in selecionados]
-                
-                # Google organiza as paradas intermediárias (optimize_waypoints=True)
-                resultado = gmaps.directions(
-                    partida, 
-                    enderecos_lista[-1], 
-                    waypoints=enderecos_lista[:-1], 
-                    optimize_waypoints=True
-                )
+                resultado = gmaps.directions(partida, enderecos_lista[-1], waypoints=enderecos_lista[:-1], optimize_waypoints=True)
                 
                 ordem_otimizada = resultado[0]['waypoint_order']
-                st.success("Rota calculada com a sequência mais curta!")
-
-                # CRIAÇÃO DO RELATÓRIO COMPLETO (Waypoints + Destino Final)
-                # 1. Pegamos os intermediários na ordem que o Google mandou
                 paradas_finais = [selecionados[i] for i in ordem_otimizada]
-                # 2. Adicionamos o último que definimos como destino final
                 if len(selecionados) > 1:
                     paradas_finais.append(selecionados[-1])
                 elif len(selecionados) == 1:
                     paradas_finais = [selecionados[0]]
 
-                # Link para o Google Maps do celular
-                lista_enderecos_rota = [partida] + [p['endereco'] for p in paradas_finais]
-                link_final = "https://www.google.com/maps/dir/" + "/".join(lista_enderecos_rota)
-                st.link_button("📱 Abrir Rota no GPS do Motoboy", link_final)
+                link_final = "https://www.google.com/maps/dir/" + "/".join([partida] + [p['endereco'] for p in paradas_finais])
+                st.link_button("📱 Abrir Rota no GPS", link_final)
 
                 st.subheader("📋 Relatório de Entrega")
                 for i, item in enumerate(paradas_finais):
