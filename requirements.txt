@@ -1,5 +1,5 @@
 streamlit
 pandas
 geopy
-google-auth
+st-gsheets-connection
 ortools
