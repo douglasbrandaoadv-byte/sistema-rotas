@@ -4,7 +4,6 @@ import gspread
 from gspread_dataframe import set_with_dataframe
 import googlemaps
 import urllib.parse
-import json
 
 st.set_page_config(page_title="Rota Inteligente - Renove", layout="wide")
 
@@ -14,11 +13,11 @@ try:
     URL_PLANILHA = st.secrets["URL_PLANILHA"]
     gmaps = googlemaps.Client(key=API_KEY)
     
-    # Lemos a chave secreta e transformamos num dicionário perfeito
-    json_limpo = st.secrets["GOOGLE_JSON"].replace("\\n", "\n")
-    credenciais_dict = json.loads(json_limpo)
+    # Lemos os dados diretamente da secção TOML (sem comandos JSON que falham)
+    credenciais_dict = dict(st.secrets["credenciais_google"])
+    credenciais_dict["private_key"] = credenciais_dict["private_key"].replace("\\n", "\n")
     
-    # Conectamos diretamente ao motor do Google, ignorando os bloqueios do Streamlit
+    # Conectamos diretamente ao motor do Google com o dicionário perfeito
     gc = gspread.service_account_from_dict(credenciais_dict)
     planilha = gc.open_by_url(URL_PLANILHA)
     aba_banco = planilha.worksheet("locais")
@@ -87,7 +86,7 @@ if aba == "📍 Gestão de Locais":
                                        columns=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"])
                     df_final = pd.concat([df_existente, novo], ignore_index=True)
                     
-                    with st.spinner("A guardar no Google Sheets..."):
+                    with st.spinner("A guardar na Base de Dados..."):
                         salvar_dados(df_final)
                         
                     st.success(f"Condomínio '{nome}' adicionado com sucesso!")
@@ -115,14 +114,14 @@ if aba == "📍 Gestão de Locais":
                 b1, b2 = st.columns(2)
                 if b1.form_submit_button("✅ Guardar Alterações"):
                     df_existente.loc[idx] = [n_nome, n_rua, n_num, n_bair, n_cid, n_est]
-                    with st.spinner("A atualizar no Google Sheets..."):
+                    with st.spinner("A atualizar no sistema..."):
                         salvar_dados(df_existente)
                     st.success("Informações atualizadas!")
                     st.rerun()
 
                 if b2.form_submit_button("🗑️ Remover Registo"):
                     df_existente = df_existente.drop(idx)
-                    with st.spinner("A remover do Google Sheets..."):
+                    with st.spinner("A remover do sistema..."):
                         salvar_dados(df_existente)
                     st.warning("Condomínio removido da lista.")
                     st.rerun()
@@ -159,10 +158,7 @@ elif aba == "🚚 Gerar Itinerário":
         if st.button("🚀 Otimizar Rota (Google Maps)"):
             with st.spinner("A calcular o caminho mais rápido e económico..."):
                 try:
-                    # Todos os locais selecionados são tratados como paradas no meio do caminho
                     waypoints = [s['endereco'] for s in selecionados]
-                    
-                    # O Google Maps recebe a Partida, o Destino Final Fixo, e reorganiza os Waypoints para a menor distância
                     res = gmaps.directions(partida, destino_final_renove, waypoints=waypoints, optimize_waypoints=True)
                     
                     ordem_otimizada = res[0]['waypoint_order']
@@ -170,7 +166,6 @@ elif aba == "🚚 Gerar Itinerário":
                     
                     st.success("Trajeto mais económico calculado com sucesso!")
                     
-                    # Criação Segura do Link do GPS Universal
                     url_partida = urllib.parse.quote(partida)
                     url_paradas = "/".join([urllib.parse.quote(s['endereco']) for s in rota_ordenada])
                     url_destino = urllib.parse.quote(destino_final_renove)
@@ -189,7 +184,7 @@ elif aba == "🚚 Gerar Itinerário":
                             st.caption(f"📝 Obs: {item['obs']}")
                         st.divider()
                     
-                    st.success(f"🏁 **DESTINO FINAL:** Sede da Renove Administradora ({destino_final_renove})")
+                    st.success(f"🏁 **DESTINO FINAL:** Sede da Administradora ({destino_final_renove})")
                         
                 except Exception as e:
                     st.error("Falha ao traçar rota. Confirme se as ruas cadastradas existem no mapa e tente novamente.")
