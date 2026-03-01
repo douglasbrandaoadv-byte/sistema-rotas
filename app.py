@@ -10,7 +10,10 @@ st.set_page_config(page_title="Rota Inteligente - Renove", layout="wide")
 try:
     API_KEY = st.secrets["GOOGLE_MAPS_API_KEY"]
     gmaps = googlemaps.Client(key=API_KEY)
-    conn = st.connection("gsheets", type=GSheetsConnection)
+    
+    credenciais = dict(st.secrets["minhas_credenciais"])
+    credenciais["private_key"] = credenciais["private_key"].replace("\\n", "\n")
+    conn = st.connection("planilha_renove", type=GSheetsConnection, service_account_info=credenciais)
 except Exception as e:
     st.error(f"⚠️ Erro ao aceder às credenciais: {e}")
     st.stop()
@@ -102,7 +105,7 @@ if aba == "📍 Gestão de Locais":
     st.dataframe(df_existente, use_container_width=True)
 
 elif aba == "🚚 Gerar Itinerário":
-    st.header("Cálculo de Rota Económica")
+    st.header("Cálculo de Rota Económica (Menor Distância)")
     df_locais = buscar_dados()
     
     if df_locais.empty:
@@ -124,37 +127,35 @@ elif aba == "🚚 Gerar Itinerário":
             selecionados.append({"nome": nome_sel, "endereco": end, "missao": missao_sel, "obs": obs})
 
         partida = st.text_input("Ponto de Partida (Onde o motoboy está agora):", value="João Pessoa, PB")
+        
+        # O Destino Final é cravado no código para fechar a rota
+        destino_final_renove = "Rua Rodrigues de Aquino, 267, Centro, João Pessoa, PB"
 
         if st.button("🚀 Otimizar Rota (Google Maps)"):
-            with st.spinner("A calcular o caminho mais rápido..."):
+            with st.spinner("A calcular o caminho mais rápido e económico..."):
                 try:
-                    ends = [s['endereco'] for s in selecionados]
+                    # Todos os locais selecionados são tratados como paradas no meio do caminho
+                    waypoints = [s['endereco'] for s in selecionados]
                     
-                    if len(ends) == 1:
-                        # Se houver apenas 1 destino, não há paradas intermediárias para ordenar
-                        rota_ordenada = [selecionados[0]]
-                    else:
-                        # Para múltiplos destinos, o Google pede a partida, o destino final, e os pontos intermediários (waypoints)
-                        destino_final = ends[-1]
-                        waypoints = ends[:-1]
-                        
-                        res = gmaps.directions(partida, destino_final, waypoints=waypoints, optimize_waypoints=True)
-                        
-                        # O Google devolve a ordem otimizada apenas dos waypoints. Precisamos anexar o destino final no fim da lista.
-                        ordem_waypoints = res[0]['waypoint_order']
-                        rota_ordenada = [selecionados[i] for i in ordem_waypoints] + [selecionados[-1]]
+                    # O Google Maps recebe a Partida, o Destino Final Fixo, e reorganiza os Waypoints para a menor distância
+                    res = gmaps.directions(partida, destino_final_renove, waypoints=waypoints, optimize_waypoints=True)
                     
-                    st.success("Trajeto gerado!")
+                    ordem_otimizada = res[0]['waypoint_order']
+                    rota_ordenada = [selecionados[i] for i in ordem_otimizada]
                     
-                    # Criação Segura do Link do Google Maps
+                    st.success("Trajeto mais económico calculado com sucesso!")
+                    
+                    # Criação Segura do Link do GPS Universal
                     url_partida = urllib.parse.quote(partida)
                     url_paradas = "/".join([urllib.parse.quote(s['endereco']) for s in rota_ordenada])
-                    link = f"https://www.google.com/maps/dir/{url_partida}/{url_paradas}"
+                    url_destino = urllib.parse.quote(destino_final_renove)
                     
-                    st.link_button("📱 Abrir Rota Direto no GPS", link)
+                    link = f"https://www.google.com/maps/dir/{url_partida}/{url_paradas}/{url_destino}"
+                    
+                    st.link_button("📱 Abrir Rota Direto no GPS do Motoboy", link)
 
-                    st.subheader("📋 Relatório da Rota")
-                    st.info(f"🏍️ **INÍCIO:** {partida}")
+                    st.subheader("📋 Relatório da Rota Inteligente")
+                    st.info(f"🏍️ **INÍCIO (Partida):** {partida}")
                     
                     for i, item in enumerate(rota_ordenada):
                         st.write(f"**{i+1}ª Parada - {item['nome']}** | 🎯 {item['missao']}")
@@ -162,6 +163,8 @@ elif aba == "🚚 Gerar Itinerário":
                         if item['obs']:
                             st.caption(f"📝 Obs: {item['obs']}")
                         st.divider()
+                    
+                    st.success(f"🏁 **DESTINO FINAL:** Sede da Renove Administradora ({destino_final_renove})")
                         
                 except Exception as e:
                     st.error("Falha ao traçar rota. Confirme se as ruas cadastradas existem no mapa e tente novamente.")
