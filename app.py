@@ -4,6 +4,9 @@ import gspread
 from gspread_dataframe import set_with_dataframe
 import googlemaps
 import urllib.parse
+import json
+from datetime import datetime
+import pytz
 
 st.set_page_config(page_title="Rota Inteligente - Renove", layout="wide")
 
@@ -18,7 +21,10 @@ try:
     
     gc = gspread.service_account_from_dict(credenciais_dict)
     planilha = gc.open_by_url(URL_PLANILHA)
+    
+    # Conecta às duas abas da planilha
     aba_banco = planilha.worksheet("locais")
+    aba_historico = planilha.worksheet("historico_rotas")
     
 except Exception as e:
     st.error(f"⚠️ Erro ao aceder ao sistema do Google: {e}")
@@ -63,7 +69,7 @@ if st.sidebar.button("Terminar Sessão"):
     st.query_params.clear()
     st.rerun()
 
-aba = st.sidebar.radio("Navegação", ["📍 Gestão de Locais", "🚚 Gerar Itinerário"])
+aba = st.sidebar.radio("Navegação", ["📍 Gestão de Locais", "🚚 Gerar Itinerário", "📊 Relatórios de Rotas"])
 
 if aba == "📍 Gestão de Locais":
     st.header("Base de Dados de Condomínios")
@@ -93,7 +99,6 @@ if aba == "📍 Gestão de Locais":
                     st.success(f"Condomínio '{nome}' adicionado com sucesso!")
                     st.rerun()
 
-    # --- ABA DE LOTE MELHORADA COM PLANILHA ONLINE ---
     with tab_lote:
         modo_lote = st.radio("Selecione o método de cadastro em lote:", 
                              ["📝 Preencher Planilha Online", "📁 Upload de Arquivo (Excel/CSV)"])
@@ -101,21 +106,17 @@ if aba == "📍 Gestão de Locais":
         if modo_lote == "📝 Preencher Planilha Online":
             st.info("💡 **Dica:** Preencha os dados diretamente na grade abaixo. Para adicionar mais linhas, basta clicar na última linha vazia ou no ícone de '+' que aparece no final. Você também pode copiar e colar dados de fora.")
             
-            # Cria 5 linhas em branco por padrão para facilitar a digitação
             df_template = pd.DataFrame(
                 [["", "", "", "", "João Pessoa", "PB"]] * 5,
                 columns=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"]
             )
             
-            # Renderiza a planilha editável
             df_editado = st.data_editor(df_template, num_rows="dynamic")
             
             if st.button("🚀 Cadastrar Todos da Planilha"):
-                # Limpa as linhas que o utilizador deixou em branco
                 df_valido = df_editado[df_editado["NOME"].str.strip() != ""]
                 
                 if not df_valido.empty:
-                    # Junta os novos dados com os antigos e remove nomes duplicados
                     df_final = pd.concat([df_existente, df_valido], ignore_index=True)
                     df_final = df_final.drop_duplicates(subset=['NOME'], keep='last')
                     
@@ -127,7 +128,7 @@ if aba == "📍 Gestão de Locais":
                 else:
                     st.warning("⚠️ Preencha pelo menos o 'NOME' de um local válido na planilha antes de cadastrar.")
 
-        else: # O modo antigo de Upload de Arquivo
+        else: 
             st.info("💡 **Dica:** A sua planilha deve conter as seguintes colunas exatas na primeira linha: **NOME, RUA, NUMERO, BAIRRO, CIDADE, ESTADO**")
             arquivo_up = st.file_uploader("Selecione a sua planilha (.csv ou .xlsx)", type=["csv", "xlsx"])
             
@@ -193,8 +194,6 @@ if aba == "📍 Gestão de Locais":
                     st.warning("Condomínio removido da lista.")
                     st.rerun()
 
-    st.dataframe(df_existente)
-
 elif aba == "🚚 Gerar Itinerário":
     st.header("Cálculo de Rota Económica (Menor Distância)")
     df_locais = buscar_dados()
@@ -243,14 +242,72 @@ elif aba == "🚚 Gerar Itinerário":
                     st.subheader("📋 Relatório da Rota Inteligente")
                     st.info(f"🏍️ **INÍCIO (Partida):** {partida}")
                     
+                    # String para gravar o percurso no histórico
+                    nomes_rota_historico = []
+                    
                     for i, item in enumerate(rota_ordenada):
                         st.write(f"**{i+1}ª Parada - {item['nome']}** | 🎯 {item['missao']}")
                         st.write(f"📍 {item['endereco']}")
                         if item['obs']:
                             st.caption(f"📝 Obs: {item['obs']}")
                         st.divider()
+                        nomes_rota_historico.append(item['nome'])
                     
                     st.success(f"🏁 **DESTINO FINAL:** Sede da Administradora ({destino_final_renove})")
+                    nomes_rota_historico.append("Sede Renove")
+                    
+                    # --- NOVO: SALVAR NO HISTÓRICO COM FUSO HORÁRIO DE JOÃO PESSOA ---
+                    fuso_jp = pytz.timezone('America/Fortaleza')
+                    agora = datetime.now(fuso_jp)
+                    
+                    linha_historico = [
+                        agora.strftime("%d/%m/%Y"),           # DATA
+                        agora.strftime("%H:%M"),              # HORA
+                        partida,                              # PARTIDA
+                        " ➔ ".join(nomes_rota_historico)      # ROTA COMPLETA
+                    ]
+                    
+                    try:
+                        aba_historico.append_row(linha_historico)
+                    except Exception as e:
+                        st.warning("A rota foi gerada no ecrã, mas houve uma falha ao arquivar no histórico.")
                         
                 except Exception as e:
                     st.error("Falha ao traçar rota. Confirme se as ruas cadastradas existem no mapa e tente novamente.")
+
+# --- NOVA ABA: RELATÓRIOS ---
+elif aba == "📊 Relatórios de Rotas":
+    st.header("Histórico de Rotas Geradas")
+    
+    try:
+        dados_historico = aba_historico.get_all_records()
+        
+        if not dados_historico:
+            st.info("Nenhuma rota foi gerada e gravada ainda.")
+        else:
+            df_hist = pd.DataFrame(dados_historico)
+            
+            # Filtro por Data
+            datas_disponiveis = df_hist['DATA'].unique().tolist()
+            # Inverte para mostrar as mais recentes primeiro
+            datas_disponiveis.reverse() 
+            
+            data_selecionada = st.selectbox("📅 Selecione a Data para visualizar:", ["Todas as Datas"] + datas_disponiveis)
+            
+            if data_selecionada != "Todas as Datas":
+                df_hist = df_hist[df_hist['DATA'] == data_selecionada]
+                
+            # Exibe a tabela formatada
+            st.dataframe(df_hist, use_container_width=True, hide_index=True)
+            
+            # Botão para baixar o Excel do relatório filtrado
+            csv = df_hist.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Descarregar Relatório em Excel (CSV)",
+                data=csv,
+                file_name=f"relatorio_rotas_{data_selecionada.replace('/', '-')}.csv",
+                mime="text/csv",
+            )
+            
+    except Exception as e:
+        st.error("⚠️ Ocorreu um erro ao ler o histórico. Certifique-se de que criou a aba 'historico_rotas' na sua folha de cálculo com os títulos exatos na primeira linha: DATA | HORA | PARTIDA | ROTA.")
