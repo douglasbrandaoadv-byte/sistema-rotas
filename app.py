@@ -2,63 +2,61 @@ import streamlit as st
 import pandas as pd
 from streamlit_gsheets import GSheetsConnection
 import googlemaps
+import json
 
-# --- CONFIGURAÇÃO DA PÁGINA ---
+# --- 1. CONFIGURAÇÃO E BLINDAGEM DA CONEXÃO ---
 st.set_page_config(page_title="Rota Inteligente - Renove", layout="wide")
 
-# --- 1. CONEXÃO COM PROTEÇÃO ANTIFALHA ---
 try:
+    # 1. Carrega o Maps e a URL
     API_KEY = st.secrets["GOOGLE_MAPS_API_KEY"]
     gmaps = googlemaps.Client(key=API_KEY)
+    URL_PLANILHA = st.secrets["URL_PLANILHA"]
     
-    # O "Pulo do Gato": O código limpa as barras duplas invisíveis da sua chave
-    chave_bruta = st.secrets["connections"]["gsheets"]["private_key"]
-    chave_limpa = chave_bruta.replace("\\n", "\n").replace("\r", "")
+    # 2. Transforma o texto bruto do Secrets em um dicionário Python perfeito
+    json_bruto = st.secrets["JSON_CONTA_SERVICO"]
+    info_conta = json.loads(json_bruto)
     
-    # O sistema se conecta usando a chave perfeitamente formatada
-    conn = st.connection("gsheets", type=GSheetsConnection, private_key=chave_limpa)
-    URL_PLANILHA = st.secrets["connections"]["gsheets"]["spreadsheet"]
+    # 3. Conecta repassando as credenciais de forma limpa (ignora bugs do Streamlit)
+    conn = st.connection("banco_renove", type=GSheetsConnection, service_account_info=info_conta)
 except Exception as e:
-    st.error("Erro interno de chaves. Verifique o painel Secrets.")
+    st.error(f"Ocorreu um erro interno de configuração: {e}")
     st.stop()
 
-# --- FUNÇÃO DE BUSCA SEGURA ---
 def buscar_dados():
     try:
-        # Busca foca exclusivamente na aba de locais para evitar erros
         return conn.read(spreadsheet=URL_PLANILHA, worksheet="locais", ttl="0")
     except Exception as e:
         return pd.DataFrame(columns=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"])
 
-# --- SISTEMA DE LOGIN ---
+# --- 2. SISTEMA DE LOGIN ---
 if 'logado' not in st.session_state:
     st.session_state.logado = False
 
 if not st.session_state.logado:
-    st.title("🔐 Acesso Restrito - Renove")
-    if st.text_input("Senha", type="password") == "admin123":
-        if st.button("Entrar"):
+    st.title("🔐 Acesso Restrito - Renove Administradora")
+    if st.text_input("Senha de Acesso", type="password") == "admin123":
+        if st.button("Entrar no Sistema"):
             st.session_state.logado = True
             st.rerun()
     st.stop()
 
-# --- MENU PRINCIPAL ---
-st.sidebar.success("Sistema Renove Ativo")
+# --- 3. MENU E INTERFACE PRINCIPAL ---
+st.sidebar.success("✅ Conexão Estabelecida")
 if st.sidebar.button("Sair"):
     st.session_state.logado = False
     st.rerun()
 
-aba = st.sidebar.radio("Navegação", ["📍 Cadastrar Locais", "🚚 Criar Rota Inteligente"])
+aba = st.sidebar.radio("Navegação", ["📍 Gerenciar Estabelecimentos", "🚚 Gerar Rota Inteligente"])
 
-if aba == "📍 Cadastrar Locais":
-    st.header("Gestão de Estabelecimentos")
+if aba == "📍 Gerenciar Estabelecimentos":
+    st.header("Base de Dados de Condomínios")
     df_existente = buscar_dados()
     
-    tab_novo, tab_gerenciar = st.tabs(["➕ Novo Cadastro", "⚙️ Editar ou Excluir"])
+    tab_novo, tab_gerenciar = st.tabs(["➕ Cadastrar Novo Local", "⚙️ Editar/Excluir"])
 
     with tab_novo:
         with st.form("form_novo"):
-            st.subheader("Cadastrar Local")
             c1, c2 = st.columns(2)
             nome = c1.text_input("NOME DO LOCAL")
             rua = c2.text_input("RUA")
@@ -67,103 +65,91 @@ if aba == "📍 Cadastrar Locais":
             cidade = c1.text_input("CIDADE", value="João Pessoa")
             estado = c2.text_input("ESTADO", value="PB")
             
-            if st.form_submit_button("Salvar Local"):
+            if st.form_submit_button("Salvar no Banco de Dados"):
                 if nome and rua:
                     novo = pd.DataFrame([[nome, rua, num, bairro, cidade, estado]], 
                                        columns=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"])
                     df_final = pd.concat([df_existente, novo], ignore_index=True)
-                    
-                    # Atualiza os dados na nuvem da Renove
                     conn.update(spreadsheet=URL_PLANILHA, worksheet="locais", data=df_final)
-                    st.success(f"'{nome}' cadastrado com sucesso!")
+                    st.success(f"Condomínio '{nome}' salvo com sucesso!")
                     st.rerun()
                 else:
-                    st.warning("Preencha ao menos o Nome e a Rua.")
+                    st.warning("É obrigatório preencher o Nome e a Rua.")
 
     with tab_gerenciar:
         if df_existente.empty:
-            st.warning("Nenhum local cadastrado para gerenciar.")
+            st.info("Nenhum local cadastrado ainda.")
         else:
-            st.subheader("Selecionar Local para Modificação")
             lista_nomes = df_existente['NOME'].tolist()
-            selecionado = st.selectbox("Escolha o estabelecimento:", lista_nomes)
+            selecionado = st.selectbox("Selecione o local para modificar:", lista_nomes)
             
-            dados_local = df_existente[df_existente['NOME'] == selecionado].iloc[0]
-            idx_original = df_existente[df_existente['NOME'] == selecionado].index[0]
+            dados = df_existente[df_existente['NOME'] == selecionado].iloc[0]
+            idx = df_existente[df_existente['NOME'] == selecionado].index[0]
 
             with st.form("form_edicao"):
                 c1, c2 = st.columns(2)
-                novo_nome = c1.text_input("NOME", value=dados_local['NOME'])
-                nova_rua = c2.text_input("RUA", value=dados_local['RUA'])
-                novo_num = c1.text_input("NÚMERO", value=str(dados_local['NUMERO']))
-                novo_bairro = c2.text_input("BAIRRO", value=dados_local['BAIRRO'])
-                nova_cidade = c1.text_input("CIDADE", value=dados_local['CIDADE'])
-                novo_estado = c2.text_input("ESTADO", value=dados_local['ESTADO'])
+                n_nome = c1.text_input("NOME", value=dados['NOME'])
+                n_rua = c2.text_input("RUA", value=dados['RUA'])
+                n_num = c1.text_input("NÚMERO", value=str(dados['NUMERO']))
+                n_bair = c2.text_input("BAIRRO", value=dados['BAIRRO'])
+                n_cid = c1.text_input("CIDADE", value=dados['CIDADE'])
+                n_est = c2.text_input("ESTADO", value=dados['ESTADO'])
                 
-                col_btn1, col_btn2 = st.columns(2)
-                btn_atualizar = col_btn1.form_submit_button("✅ Salvar Alterações")
-                btn_excluir = col_btn2.form_submit_button("🗑️ Excluir Cadastro")
-
-                if btn_atualizar:
-                    df_existente.loc[idx_original] = [novo_nome, nova_rua, novo_num, novo_bairro, nova_cidade, novo_estado]
+                b1, b2 = st.columns(2)
+                if b1.form_submit_button("✅ Confirmar Alteração"):
+                    df_existente.loc[idx] = [n_nome, n_rua, n_num, n_bair, n_cid, n_est]
                     conn.update(spreadsheet=URL_PLANILHA, worksheet="locais", data=df_existente)
-                    st.success("Informações atualizadas!")
+                    st.success("Atualizado!")
                     st.rerun()
 
-                if btn_excluir:
-                    df_novo = df_existente.drop(idx_original)
-                    conn.update(spreadsheet=URL_PLANILHA, worksheet="locais", data=df_novo)
-                    st.warning(f"'{selecionado}' removido com sucesso.")
+                if b2.form_submit_button("🗑️ Excluir Permanentemente"):
+                    df_existente = df_existente.drop(idx)
+                    conn.update(spreadsheet=URL_PLANILHA, worksheet="locais", data=df_existente)
+                    st.warning("Registro removido.")
                     st.rerun()
 
-    st.divider()
-    st.subheader("Base de Dados Atual")
     st.dataframe(df_existente, use_container_width=True)
 
-elif aba == "🚚 Criar Rota Inteligente":
-    st.header("Gerar Itinerário Econômico")
+elif aba == "🚚 Gerar Rota Inteligente":
+    st.header("Otimização de Trajeto para o Motoboy")
     df_locais = buscar_dados()
     
     if df_locais.empty:
-        st.warning("Cadastre locais primeiro.")
+        st.warning("Cadastre os condomínios na aba ao lado primeiro.")
     else:
-        qtd = st.number_input("Quantos destinos hoje?", min_value=1, step=1)
-        missoes = ["ENTREGA DE BOLETOS", "ENTREGA DE NOTIFICAÇÃO", "ENTREGA DE FOLHA DE PAGAMENTO", "REGISTRO DE ATAS", "RECOLHER ATAS", "RECOLHER DOCUMENTOS"]
+        qtd = st.number_input("Destinos da diligência:", min_value=1, step=1)
+        missoes = ["ENTREGA DE BOLETOS", "NOTIFICAÇÃO", "RECOLHER ATAS", "DOCUMENTOS"]
         
         selecionados = []
         for i in range(int(qtd)):
             st.markdown("---")
-            col1, col2, col3 = st.columns(3)
-            nome_sel = col1.selectbox(f"Local {i+1}", df_locais['NOME'].unique(), key=f"l_{i}")
-            missao_sel = col2.selectbox(f"Missão", missoes, key=f"m_{i}")
-            obs = col3.text_input("Observação", key=f"o_{i}")
+            c1, c2, c3 = st.columns(3)
+            nome_sel = c1.selectbox(f"Parada {i+1}", df_locais['NOME'].unique(), key=f"l_{i}")
+            missao_sel = c2.selectbox("Missão", missoes, key=f"m_{i}")
+            obs = c3.text_input("Observação", key=f"o_{i}")
             
             row = df_locais[df_locais['NOME'] == nome_sel].iloc[0]
-            endereco = f"{row['RUA']}, {row['NUMERO']}, {row['BAIRRO']}, {row['CIDADE']}, {row['ESTADO']}"
-            selecionados.append({"nome": nome_sel, "endereco": endereco, "missao": missao_sel, "obs": obs})
+            end = f"{row['RUA']}, {row['NUMERO']}, {row['BAIRRO']}, {row['CIDADE']}, {row['ESTADO']}"
+            selecionados.append({"nome": nome_sel, "endereco": end, "missao": missao_sel, "obs": obs})
 
-        st.subheader("Ponto de Partida")
-        partida = st.text_input("De onde o motoboy está saindo?", value="João Pessoa, PB")
+        partida = st.text_input("Ponto de Partida:", value="João Pessoa, PB")
 
-        if st.button("🚀 Gerar Melhor Rota"):
-            with st.spinner("Otimizando trajeto com Google Maps..."):
+        if st.button("🚀 Calcular Rota"):
+            with st.spinner("Conectando ao Google Maps..."):
                 try:
-                    enderecos_lista = [s['endereco'] for s in selecionados]
-                    resultado = gmaps.directions(partida, enderecos_lista[-1], waypoints=enderecos_lista[:-1], optimize_waypoints=True)
+                    ends = [s['endereco'] for s in selecionados]
+                    res = gmaps.directions(partida, ends[-1], waypoints=ends[:-1], optimize_waypoints=True)
                     
-                    ordem_otimizada = resultado[0]['waypoint_order']
+                    ordem = res[0]['waypoint_order']
+                    st.success("Melhor caminho calculado!")
                     
-                    st.success("Rota calculada com a sequência mais curta!")
-                    
-                    link_final = f"https://www.google.com/maps/dir//{partida}/" + "/".join([selecionados[i]['endereco'] for i in ordem_otimizada])
-                    st.link_button("📱 Abrir Rota no GPS do Motoboy", link_final)
+                    link = f"https://www.google.com/maps/dir//{partida}/" + "/".join([selecionados[i]['endereco'] for i in ordem])
+                    st.link_button("📱 Abrir GPS", link)
 
-                    st.subheader("📋 Relatório de Entrega")
-                    for i, idx_original in enumerate(ordem_otimizada):
-                        item = selecionados[idx_original]
-                        st.markdown(f"**{i+1}ª Parada: {item['nome']}**")
+                    for i, idx in enumerate(ordem):
+                        item = selecionados[idx]
+                        st.write(f"**{i+1}º - {item['nome']}** | {item['missao']}")
                         st.write(f"📍 {item['endereco']}")
-                        st.write(f"🎯 Missão: {item['missao']} | 📝 Obs: {item['obs']}")
                         st.divider()
-                except Exception as e:
-                    st.error("Erro ao gerar a rota. Verifique se os endereços estão corretos.")
+                except Exception:
+                    st.error("Falha ao gerar o mapa. Verifique se os endereços existem.")
