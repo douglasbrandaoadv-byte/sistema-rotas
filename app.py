@@ -5,29 +5,33 @@ import googlemaps
 
 st.set_page_config(page_title="Rota Inteligente - Renove", layout="wide")
 
-# --- CONEXÃO BLINDADA ---
+URL_PLANILHA = "https://docs.google.com/spreadsheets/d/1ZcDvu-PkdXEgUP0vI50Iit5nm29MdFRmoFwPg3RkGGE/edit"
+
+# --- O CONTROLO MANUAL QUE RESOLVE O PROBLEMA ---
 try:
     API_KEY = st.secrets["GOOGLE_MAPS_API_KEY"]
     gmaps = googlemaps.Client(key=API_KEY)
     
-    # Prevenção: Corrige as quebras de linha caso o servidor as leia como texto
-    segredos = dict(st.secrets["connections"]["gsheets"])
-    if "private_key" in segredos:
-        segredos["private_key"] = segredos["private_key"].replace("\\n", "\n")
-        
-    conn = st.connection("gsheets", type=GSheetsConnection, **segredos)
+    # 1. Carrega as credenciais com o novo nome
+    credenciais = dict(st.secrets["minhas_credenciais"])
+    
+    # 2. Força a conversão correta das quebras de linha da chave mestra
+    credenciais["private_key"] = credenciais["private_key"].replace("\\n", "\n")
+    
+    # 3. Estabelece a ligação enviando os dados limpos diretamente (ignorando o auto-loader do Streamlit)
+    conn = st.connection("planilha_renove", type=GSheetsConnection, service_account_info=credenciais)
 except Exception as e:
-    st.error(f"Erro na ligação ao servidor: {e}")
+    st.error(f"Erro na ligação inicial: {e}")
     st.stop()
 
 def buscar_dados():
     try:
-        return conn.read(worksheet="locais", ttl="0")
+        return conn.read(spreadsheet=URL_PLANILHA, worksheet="locais", ttl="0")
     except Exception as e:
-        st.error(f"Falha ao descarregar base de dados: {e}")
+        st.error(f"Não foi possível ler os dados: {e}")
         return pd.DataFrame(columns=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"])
 
-# --- SISTEMA DE LOGIN ---
+# --- SISTEMA DE INÍCIO DE SESSÃO ---
 if 'logado' not in st.session_state:
     st.session_state.logado = False
 
@@ -40,7 +44,7 @@ if not st.session_state.logado:
     st.stop()
 
 # --- MENU E INTERFACE ---
-st.sidebar.success("✅ Conectado ao Google")
+st.sidebar.success("✅ Conectado ao Servidor")
 if st.sidebar.button("Sair"):
     st.session_state.logado = False
     st.rerun()
@@ -63,12 +67,12 @@ if aba == "📍 Gerir Estabelecimentos":
             cidade = c1.text_input("CIDADE", value="João Pessoa")
             estado = c2.text_input("ESTADO", value="PB")
             
-            if st.form_submit_button("Salvar no Banco de Dados"):
+            if st.form_submit_button("Guardar no Sistema"):
                 if nome and rua:
                     novo = pd.DataFrame([[nome, rua, num, bairro, cidade, estado]], 
                                        columns=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"])
                     df_final = pd.concat([df_existente, novo], ignore_index=True)
-                    conn.update(worksheet="locais", data=df_final)
+                    conn.update(spreadsheet=URL_PLANILHA, worksheet="locais", data=df_final)
                     st.success(f"Condomínio '{nome}' guardado com sucesso!")
                     st.rerun()
 
@@ -94,13 +98,13 @@ if aba == "📍 Gerir Estabelecimentos":
                 b1, b2 = st.columns(2)
                 if b1.form_submit_button("✅ Guardar Alteração"):
                     df_existente.loc[idx] = [n_nome, n_rua, n_num, n_bair, n_cid, n_est]
-                    conn.update(worksheet="locais", data=df_existente)
+                    conn.update(spreadsheet=URL_PLANILHA, worksheet="locais", data=df_existente)
                     st.success("Atualizado!")
                     st.rerun()
 
                 if b2.form_submit_button("🗑️ Eliminar Permanente"):
                     df_existente = df_existente.drop(idx)
-                    conn.update(worksheet="locais", data=df_existente)
+                    conn.update(spreadsheet=URL_PLANILHA, worksheet="locais", data=df_existente)
                     st.warning("Registo removido.")
                     st.rerun()
 
@@ -111,7 +115,7 @@ elif aba == "🚚 Gerar Rota Inteligente":
     df_locais = buscar_dados()
     
     if df_locais.empty:
-        st.warning("Efetue primeiro o registo dos condomínios na aba ao lado.")
+        st.warning("Efetue primeiro o registo dos condomínios.")
     else:
         qtd = st.number_input("Destinos da diligência:", min_value=1, step=1)
         missoes = ["ENTREGA DE BOLETOS", "NOTIFICAÇÃO", "RECOLHER ATAS", "DOCUMENTOS"]
@@ -137,7 +141,7 @@ elif aba == "🚚 Gerar Rota Inteligente":
                     res = gmaps.directions(partida, ends[-1], waypoints=ends[:-1], optimize_waypoints=True)
                     
                     ordem = res[0]['waypoint_order']
-                    st.success("Caminho mais curto calculado com sucesso!")
+                    st.success("Caminho calculado com sucesso!")
                     
                     link = f"https://www.google.com/maps/dir//{partida}/" + "/".join([selecionados[i]['endereco'] for i in ordem])
                     st.link_button("📱 Abrir GPS", link)
@@ -148,4 +152,4 @@ elif aba == "🚚 Gerar Rota Inteligente":
                         st.write(f"📍 {item['endereco']}")
                         st.divider()
                 except Exception:
-                    st.error("Falha ao gerar o mapa. Verifique se os endereços são válidos.")
+                    st.error("Falha ao gerar mapa. Verifique se os endereços são válidos.")
