@@ -13,11 +13,11 @@ try:
     URL_PLANILHA = st.secrets["URL_PLANILHA"]
     gmaps = googlemaps.Client(key=API_KEY)
     
-    # Lemos os dados diretamente da secção TOML (sem comandos JSON que falham)
+    # Lemos os dados diretamente da secção TOML
     credenciais_dict = dict(st.secrets["credenciais_google"])
     credenciais_dict["private_key"] = credenciais_dict["private_key"].replace("\\n", "\n")
     
-    # Conectamos diretamente ao motor do Google com o dicionário perfeito
+    # Conectamos diretamente ao motor do Google
     gc = gspread.service_account_from_dict(credenciais_dict)
     planilha = gc.open_by_url(URL_PLANILHA)
     aba_banco = planilha.worksheet("locais")
@@ -29,11 +29,10 @@ except Exception as e:
 def buscar_dados():
     try:
         registos = aba_banco.get_all_records()
-        if not registos: # Se a planilha estiver completamente vazia
+        if not registos: # Se a planilha estiver vazia
             return pd.DataFrame(columns=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"])
             
         df = pd.DataFrame(registos)
-        # Força as colunas a serem maiúsculas para o código não se perder
         df.columns = df.columns.str.upper() 
         return df
     except Exception as e:
@@ -44,8 +43,11 @@ def salvar_dados(df):
     aba_banco.clear()
     set_with_dataframe(aba_banco, df)
 
-# --- SISTEMA DE ACESSO ---
-if 'logado' not in st.session_state:
+# --- SISTEMA DE ACESSO COM MEMÓRIA ANTI-REFRESH ---
+# 1. Verifica se a página recarregou mas o link tem a etiqueta de acesso
+if st.query_params.get("acesso") == "permitido":
+    st.session_state.logado = True
+elif 'logado' not in st.session_state:
     st.session_state.logado = False
 
 if not st.session_state.logado:
@@ -53,6 +55,8 @@ if not st.session_state.logado:
     if st.text_input("Insira a Senha", type="password") == "admin123":
         if st.button("Entrar no Sistema"):
             st.session_state.logado = True
+            # 2. Cola a etiqueta invisível no link do navegador ao fazer login
+            st.query_params["acesso"] = "permitido"
             st.rerun()
     st.stop()
 
@@ -60,6 +64,8 @@ if not st.session_state.logado:
 st.sidebar.success("✅ Conectado à Base de Dados")
 if st.sidebar.button("Terminar Sessão"):
     st.session_state.logado = False
+    # 3. Limpa a etiqueta do link ao sair, exigindo senha na próxima
+    st.query_params.clear()
     st.rerun()
 
 aba = st.sidebar.radio("Navegação", ["📍 Gestão de Locais", "🚚 Gerar Itinerário"])
@@ -152,7 +158,6 @@ elif aba == "🚚 Gerar Itinerário":
 
         partida = st.text_input("Ponto de Partida (Onde o motoboy está agora):", value="João Pessoa, PB")
         
-        # O Destino Final é cravado no código para fechar a rota
         destino_final_renove = "Rua Rodrigues de Aquino, 267, Centro, João Pessoa, PB"
 
         if st.button("🚀 Otimizar Rota (Google Maps)"):
