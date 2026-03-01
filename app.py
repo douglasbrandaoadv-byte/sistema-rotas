@@ -3,20 +3,29 @@ import pandas as pd
 from streamlit_gsheets import GSheetsConnection
 import googlemaps
 import urllib.parse
+import os
 
 st.set_page_config(page_title="Rota Inteligente - Renove", layout="wide")
 
-# --- CONEXÃO DIRETA OFICIAL ---
+# --- CONEXÃO BLINDADA (VIA FICHEIRO FÍSICO) ---
 try:
     API_KEY = st.secrets["GOOGLE_MAPS_API_KEY"]
     URL_PLANILHA = st.secrets["URL_PLANILHA"]
     gmaps = googlemaps.Client(key=API_KEY)
     
-    credenciais = dict(st.secrets["minhas_credenciais"])
-    credenciais["private_key"] = credenciais["private_key"].replace("\\n", "\n")
+    # 1. Limpamos as quebras de linha que o Streamlit teima em corromper
+    json_limpo = st.secrets["GOOGLE_JSON"].replace("\\n", "\n")
     
-    # A correção está aqui: os asteriscos (**) desempacotam o dicionário perfeitamente
-    conn = st.connection("planilha_renove", type=GSheetsConnection, **credenciais)
+    # 2. Escrevemos a chave diretamente num ficheiro seguro temporário do servidor
+    with open("/tmp/credenciais.json", "w") as f:
+        f.write(json_limpo)
+        
+    # 3. Dizemos ao sistema oficial do Google para usar este ficheiro exato
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/tmp/credenciais.json"
+    
+    # 4. A ligação arranca agora de forma nativa e sem conflitos de variáveis
+    conn = st.connection("gsheets", type=GSheetsConnection)
+    
 except Exception as e:
     st.error(f"⚠️ Erro ao aceder às credenciais: {e}")
     st.stop()
