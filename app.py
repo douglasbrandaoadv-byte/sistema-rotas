@@ -22,7 +22,6 @@ try:
     gc = gspread.service_account_from_dict(credenciais_dict)
     planilha = gc.open_by_url(URL_PLANILHA)
     
-    # Conecta às duas abas da planilha
     aba_banco = planilha.worksheet("locais")
     aba_historico = planilha.worksheet("historico_rotas")
     
@@ -104,7 +103,7 @@ if aba == "📍 Gestão de Locais":
                              ["📝 Preencher Planilha Online", "📁 Upload de Arquivo (Excel/CSV)"])
         
         if modo_lote == "📝 Preencher Planilha Online":
-            st.info("💡 **Dica:** Preencha os dados diretamente na grade abaixo. Para adicionar mais linhas, basta clicar na última linha vazia ou no ícone de '+' que aparece no final. Você também pode copiar e colar dados de fora.")
+            st.info("💡 **Dica:** Preencha os dados diretamente na grade abaixo. Para adicionar mais linhas, basta clicar na última linha vazia ou no ícone de '+' que aparece no final.")
             
             df_template = pd.DataFrame(
                 [["", "", "", "", "João Pessoa", "PB"]] * 5,
@@ -229,7 +228,15 @@ elif aba == "🚚 Gerar Itinerário":
                     ordem_otimizada = res[0]['waypoint_order']
                     rota_ordenada = [selecionados[i] for i in ordem_otimizada]
                     
-                    st.success("Trajeto mais económico calculado com sucesso!")
+                    # --- CÁLCULO DA QUILOMETRAGEM TOTAL ---
+                    distancia_total_metros = 0
+                    for leg in res[0]['legs']:
+                        distancia_total_metros += leg['distance']['value']
+                    
+                    distancia_total_km = round(distancia_total_metros / 1000, 1)
+                    distancia_texto = f"{distancia_total_km} km"
+                    
+                    st.success(f"Trajeto mais económico calculado com sucesso! (Distância total: {distancia_texto})")
                     
                     url_partida = urllib.parse.quote(partida)
                     url_paradas = "/".join([urllib.parse.quote(s['endereco']) for s in rota_ordenada])
@@ -242,7 +249,6 @@ elif aba == "🚚 Gerar Itinerário":
                     st.subheader("📋 Relatório da Rota Inteligente")
                     st.info(f"🏍️ **INÍCIO (Partida):** {partida}")
                     
-                    # String para gravar o percurso no histórico
                     nomes_rota_historico = []
                     
                     for i, item in enumerate(rota_ordenada):
@@ -256,7 +262,6 @@ elif aba == "🚚 Gerar Itinerário":
                     st.success(f"🏁 **DESTINO FINAL:** Sede da Administradora ({destino_final_renove})")
                     nomes_rota_historico.append("Sede Renove")
                     
-                    # --- NOVO: SALVAR NO HISTÓRICO COM FUSO HORÁRIO DE JOÃO PESSOA ---
                     fuso_jp = pytz.timezone('America/Fortaleza')
                     agora = datetime.now(fuso_jp)
                     
@@ -264,7 +269,8 @@ elif aba == "🚚 Gerar Itinerário":
                         agora.strftime("%d/%m/%Y"),           # DATA
                         agora.strftime("%H:%M"),              # HORA
                         partida,                              # PARTIDA
-                        " ➔ ".join(nomes_rota_historico)      # ROTA COMPLETA
+                        " ➔ ".join(nomes_rota_historico),     # ROTA COMPLETA
+                        distancia_texto                       # KM TOTAL
                     ]
                     
                     try:
@@ -275,7 +281,6 @@ elif aba == "🚚 Gerar Itinerário":
                 except Exception as e:
                     st.error("Falha ao traçar rota. Confirme se as ruas cadastradas existem no mapa e tente novamente.")
 
-# --- NOVA ABA: RELATÓRIOS ---
 elif aba == "📊 Relatórios de Rotas":
     st.header("Histórico de Rotas Geradas")
     
@@ -288,26 +293,26 @@ elif aba == "📊 Relatórios de Rotas":
             df_hist = pd.DataFrame(dados_historico)
             
             # Filtro por Data
-            datas_disponiveis = df_hist['DATA'].unique().tolist()
-            # Inverte para mostrar as mais recentes primeiro
-            datas_disponiveis.reverse() 
-            
-            data_selecionada = st.selectbox("📅 Selecione a Data para visualizar:", ["Todas as Datas"] + datas_disponiveis)
-            
-            if data_selecionada != "Todas as Datas":
-                df_hist = df_hist[df_hist['DATA'] == data_selecionada]
+            if 'DATA' in df_hist.columns:
+                datas_disponiveis = df_hist['DATA'].unique().tolist()
+                datas_disponiveis.reverse() 
                 
-            # Exibe a tabela formatada
+                data_selecionada = st.selectbox("📅 Selecione a Data para visualizar:", ["Todas as Datas"] + datas_disponiveis)
+                
+                if data_selecionada != "Todas as Datas":
+                    df_hist = df_hist[df_hist['DATA'] == data_selecionada]
+            
+            # Exibe os dados (agora com a coluna KM TOTAL)
             st.dataframe(df_hist, use_container_width=True, hide_index=True)
             
-            # Botão para baixar o Excel do relatório filtrado
-            csv = df_hist.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Descarregar Relatório em Excel (CSV)",
-                data=csv,
-                file_name=f"relatorio_rotas_{data_selecionada.replace('/', '-')}.csv",
-                mime="text/csv",
-            )
+            if 'DATA' in df_hist.columns:
+                csv = df_hist.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Descarregar Relatório em Excel (CSV)",
+                    data=csv,
+                    file_name=f"relatorio_rotas_{data_selecionada.replace('/', '-')}.csv" if data_selecionada != "Todas as Datas" else "relatorio_rotas_todas.csv",
+                    mime="text/csv",
+                )
             
     except Exception as e:
-        st.error("⚠️ Ocorreu um erro ao ler o histórico. Certifique-se de que criou a aba 'historico_rotas' na sua folha de cálculo com os títulos exatos na primeira linha: DATA | HORA | PARTIDA | ROTA.")
+        st.error("⚠️ Ocorreu um erro ao ler o histórico. Certifique-se de que criou a aba 'historico_rotas' na sua folha de cálculo com os títulos exatos: DATA | HORA | PARTIDA | ROTA | KM TOTAL.")
