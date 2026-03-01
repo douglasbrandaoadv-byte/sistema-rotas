@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from streamlit_gsheets import GSheetsConnection
 import googlemaps
+import urllib.parse
 
 st.set_page_config(page_title="Rota Inteligente - Renove", layout="wide")
 
@@ -18,7 +19,7 @@ def buscar_dados():
     try:
         return conn.read(worksheet="locais", ttl="0")
     except Exception as e:
-        st.warning(f"Planilha sem dados ou não acessível no momento.")
+        st.warning("Planilha sem dados ou não acessível no momento.")
         return pd.DataFrame(columns=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"])
 
 # --- SISTEMA DE ACESSO ---
@@ -114,7 +115,7 @@ elif aba == "🚚 Gerar Itinerário":
         for i in range(int(qtd)):
             st.markdown("---")
             c1, c2, c3 = st.columns(3)
-            nome_sel = c1.selectbox(f"Parada {i+1}", df_locais['NOME'].unique(), key=f"l_{i}")
+            nome_sel = c1.selectbox(f"Diligência {i+1}", df_locais['NOME'].unique(), key=f"l_{i}")
             missao_sel = c2.selectbox("Tarefa", missoes, key=f"m_{i}")
             obs = c3.text_input("Observações (Opcional)", key=f"o_{i}")
             
@@ -122,24 +123,45 @@ elif aba == "🚚 Gerar Itinerário":
             end = f"{row['RUA']}, {row['NUMERO']}, {row['BAIRRO']}, {row['CIDADE']}, {row['ESTADO']}"
             selecionados.append({"nome": nome_sel, "endereco": end, "missao": missao_sel, "obs": obs})
 
-        partida = st.text_input("Morada de Partida (Motoboy):", value="João Pessoa, PB")
+        partida = st.text_input("Ponto de Partida (Onde o motoboy está agora):", value="João Pessoa, PB")
 
         if st.button("🚀 Otimizar Rota (Google Maps)"):
             with st.spinner("A calcular o caminho mais rápido..."):
                 try:
                     ends = [s['endereco'] for s in selecionados]
-                    res = gmaps.directions(partida, ends[-1], waypoints=ends[:-1], optimize_waypoints=True)
                     
-                    ordem = res[0]['waypoint_order']
+                    if len(ends) == 1:
+                        # Se houver apenas 1 destino, não há paradas intermediárias para ordenar
+                        rota_ordenada = [selecionados[0]]
+                    else:
+                        # Para múltiplos destinos, o Google pede a partida, o destino final, e os pontos intermediários (waypoints)
+                        destino_final = ends[-1]
+                        waypoints = ends[:-1]
+                        
+                        res = gmaps.directions(partida, destino_final, waypoints=waypoints, optimize_waypoints=True)
+                        
+                        # O Google devolve a ordem otimizada apenas dos waypoints. Precisamos anexar o destino final no fim da lista.
+                        ordem_waypoints = res[0]['waypoint_order']
+                        rota_ordenada = [selecionados[i] for i in ordem_waypoints] + [selecionados[-1]]
+                    
                     st.success("Trajeto gerado!")
                     
-                    link = f"https://www.google.com/maps/dir//{partida}/" + "/".join([selecionados[i]['endereco'] for i in ordem])
-                    st.link_button("📱 Abrir no GPS", link)
+                    # Criação Segura do Link do Google Maps
+                    url_partida = urllib.parse.quote(partida)
+                    url_paradas = "/".join([urllib.parse.quote(s['endereco']) for s in rota_ordenada])
+                    link = f"https://www.google.com/maps/dir/{url_partida}/{url_paradas}"
+                    
+                    st.link_button("📱 Abrir Rota Direto no GPS", link)
 
-                    for i, idx in enumerate(ordem):
-                        item = selecionados[idx]
-                        st.write(f"**{i+1}º - {item['nome']}** | {item['missao']}")
+                    st.subheader("📋 Relatório da Rota")
+                    st.info(f"🏍️ **INÍCIO:** {partida}")
+                    
+                    for i, item in enumerate(rota_ordenada):
+                        st.write(f"**{i+1}ª Parada - {item['nome']}** | 🎯 {item['missao']}")
                         st.write(f"📍 {item['endereco']}")
+                        if item['obs']:
+                            st.caption(f"📝 Obs: {item['obs']}")
                         st.divider()
-                except Exception:
-                    st.error("Falha ao traçar rota. Confirme se as ruas cadastradas existem no mapa.")
+                        
+                except Exception as e:
+                    st.error("Falha ao traçar rota. Confirme se as ruas cadastradas existem no mapa e tente novamente.")
