@@ -13,11 +13,9 @@ try:
     URL_PLANILHA = st.secrets["URL_PLANILHA"]
     gmaps = googlemaps.Client(key=API_KEY)
     
-    # Lemos os dados diretamente da secção TOML
     credenciais_dict = dict(st.secrets["credenciais_google"])
     credenciais_dict["private_key"] = credenciais_dict["private_key"].replace("\\n", "\n")
     
-    # Conectamos diretamente ao motor do Google
     gc = gspread.service_account_from_dict(credenciais_dict)
     planilha = gc.open_by_url(URL_PLANILHA)
     aba_banco = planilha.worksheet("locais")
@@ -29,7 +27,7 @@ except Exception as e:
 def buscar_dados():
     try:
         registos = aba_banco.get_all_records()
-        if not registos: # Se a planilha estiver vazia
+        if not registos:
             return pd.DataFrame(columns=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"])
             
         df = pd.DataFrame(registos)
@@ -44,7 +42,6 @@ def salvar_dados(df):
     set_with_dataframe(aba_banco, df)
 
 # --- SISTEMA DE ACESSO COM MEMÓRIA ANTI-REFRESH ---
-# 1. Verifica se a página recarregou mas o link tem a etiqueta de acesso
 if st.query_params.get("acesso") == "permitido":
     st.session_state.logado = True
 elif 'logado' not in st.session_state:
@@ -55,7 +52,6 @@ if not st.session_state.logado:
     if st.text_input("Insira a Senha", type="password") == "admin123":
         if st.button("Entrar no Sistema"):
             st.session_state.logado = True
-            # 2. Cola a etiqueta invisível no link do navegador ao fazer login
             st.query_params["acesso"] = "permitido"
             st.rerun()
     st.stop()
@@ -64,7 +60,6 @@ if not st.session_state.logado:
 st.sidebar.success("✅ Conectado à Base de Dados")
 if st.sidebar.button("Terminar Sessão"):
     st.session_state.logado = False
-    # 3. Limpa a etiqueta do link ao sair, exigindo senha na próxima
     st.query_params.clear()
     st.rerun()
 
@@ -74,7 +69,8 @@ if aba == "📍 Gestão de Locais":
     st.header("Base de Dados de Condomínios")
     df_existente = buscar_dados()
     
-    tab_novo, tab_gerenciar = st.tabs(["➕ Adicionar Local", "⚙️ Editar/Eliminar"])
+    # ADICIONAMOS A NOVA ABA DE "CADASTRO EM LOTE" AQUI
+    tab_novo, tab_lote, tab_gerenciar = st.tabs(["➕ Adicionar Local", "📂 Cadastro em Lote", "⚙️ Editar/Eliminar"])
 
     with tab_novo:
         with st.form("form_novo"):
@@ -97,6 +93,44 @@ if aba == "📍 Gestão de Locais":
                         
                     st.success(f"Condomínio '{nome}' adicionado com sucesso!")
                     st.rerun()
+
+    # --- NOVA FUNCIONALIDADE: IMPORTAÇÃO DE PLANILHA ---
+    with tab_lote:
+        st.info("💡 **Dica:** A sua planilha deve conter as seguintes colunas exatas na primeira linha: **NOME, RUA, NUMERO, BAIRRO, CIDADE, ESTADO**")
+        arquivo_up = st.file_uploader("Selecione a sua planilha (.csv ou .xlsx)", type=["csv", "xlsx"])
+        
+        if arquivo_up is not None:
+            try:
+                # O sistema deteta automaticamente se é Excel ou CSV
+                if arquivo_up.name.endswith('.csv'):
+                    df_lote = pd.read_csv(arquivo_up)
+                else:
+                    df_lote = pd.read_excel(arquivo_up)
+                
+                # Força todas as colunas da planilha enviada a ficarem maiúsculas para evitar erros de formatação
+                df_lote.columns = df_lote.columns.str.upper().str.strip()
+                colunas_obrigatorias = ["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"]
+                
+                # Verifica se o utilizador enviou as colunas corretas
+                if all(col in df_lote.columns for col in colunas_obrigatorias):
+                    st.write("🔎 **Pré-visualização dos dados a serem importados:**")
+                    st.dataframe(df_lote[colunas_obrigatorias].head(5))
+                    
+                    if st.button("🚀 Confirmar e Guardar Lote Inteiro"):
+                        # Junta a base de dados antiga com os novos dados
+                        df_final = pd.concat([df_existente, df_lote[colunas_obrigatorias]], ignore_index=True)
+                        # Remove possíveis linhas duplicadas (mesmo nome)
+                        df_final = df_final.drop_duplicates(subset=['NOME'], keep='last')
+                        
+                        with st.spinner("A processar e a enviar tudo para o Google Sheets..."):
+                            salvar_dados(df_final)
+                        
+                        st.success(f"✅ Sucesso! {len(df_lote)} locais importados de uma só vez.")
+                        st.rerun()
+                else:
+                    st.error("⚠️ ERRO: A sua planilha não contém as colunas corretas. Verifique o cabeçalho do arquivo.")
+            except Exception as e:
+                st.error(f"Erro ao ler o ficheiro. Confirme se é um Excel/CSV válido. Detalhe: {e}")
 
     with tab_gerenciar:
         if df_existente.empty:
