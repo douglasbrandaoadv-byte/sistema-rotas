@@ -1,41 +1,49 @@
 import streamlit as st
 import pandas as pd
-from streamlit_gsheets import GSheetsConnection
+import gspread
+from gspread_dataframe import set_with_dataframe
 import googlemaps
 import urllib.parse
-import os
+import json
 
 st.set_page_config(page_title="Rota Inteligente - Renove", layout="wide")
 
-# --- CONEXÃO BLINDADA (VIA FICHEIRO FÍSICO) ---
+# --- CONEXÃO OFICIAL GOOGLE (NATIVA E SEM BUGS) ---
 try:
     API_KEY = st.secrets["GOOGLE_MAPS_API_KEY"]
     URL_PLANILHA = st.secrets["URL_PLANILHA"]
     gmaps = googlemaps.Client(key=API_KEY)
     
-    # 1. Limpamos as quebras de linha que o Streamlit teima em corromper
+    # Lemos a chave secreta e transformamos num dicionário perfeito
     json_limpo = st.secrets["GOOGLE_JSON"].replace("\\n", "\n")
+    credenciais_dict = json.loads(json_limpo)
     
-    # 2. Escrevemos a chave diretamente num ficheiro seguro temporário do servidor
-    with open("/tmp/credenciais.json", "w") as f:
-        f.write(json_limpo)
-        
-    # 3. Dizemos ao sistema oficial do Google para usar este ficheiro exato
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/tmp/credenciais.json"
-    
-    # 4. A ligação arranca agora de forma nativa e sem conflitos de variáveis
-    conn = st.connection("gsheets", type=GSheetsConnection)
+    # Conectamos diretamente ao motor do Google, ignorando os bloqueios do Streamlit
+    gc = gspread.service_account_from_dict(credenciais_dict)
+    planilha = gc.open_by_url(URL_PLANILHA)
+    aba_banco = planilha.worksheet("locais")
     
 except Exception as e:
-    st.error(f"⚠️ Erro ao aceder às credenciais: {e}")
+    st.error(f"⚠️ Erro ao aceder ao sistema do Google: {e}")
     st.stop()
 
 def buscar_dados():
     try:
-        return conn.read(spreadsheet=URL_PLANILHA, worksheet="locais", ttl="0")
+        registos = aba_banco.get_all_records()
+        if not registos: # Se a planilha estiver completamente vazia
+            return pd.DataFrame(columns=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"])
+            
+        df = pd.DataFrame(registos)
+        # Força as colunas a serem maiúsculas para o código não se perder
+        df.columns = df.columns.str.upper() 
+        return df
     except Exception as e:
-        st.warning("Planilha sem dados ou não acessível no momento.")
+        st.error(f"⚠️ Detalhe do bloqueio ao ler: {e}")
         return pd.DataFrame(columns=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"])
+
+def salvar_dados(df):
+    aba_banco.clear()
+    set_with_dataframe(aba_banco, df)
 
 # --- SISTEMA DE ACESSO ---
 if 'logado' not in st.session_state:
@@ -78,7 +86,10 @@ if aba == "📍 Gestão de Locais":
                     novo = pd.DataFrame([[nome, rua, num, bairro, cidade, estado]], 
                                        columns=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"])
                     df_final = pd.concat([df_existente, novo], ignore_index=True)
-                    conn.update(spreadsheet=URL_PLANILHA, worksheet="locais", data=df_final)
+                    
+                    with st.spinner("A guardar no Google Sheets..."):
+                        salvar_dados(df_final)
+                        
                     st.success(f"Condomínio '{nome}' adicionado com sucesso!")
                     st.rerun()
 
@@ -104,17 +115,19 @@ if aba == "📍 Gestão de Locais":
                 b1, b2 = st.columns(2)
                 if b1.form_submit_button("✅ Guardar Alterações"):
                     df_existente.loc[idx] = [n_nome, n_rua, n_num, n_bair, n_cid, n_est]
-                    conn.update(spreadsheet=URL_PLANILHA, worksheet="locais", data=df_existente)
+                    with st.spinner("A atualizar no Google Sheets..."):
+                        salvar_dados(df_existente)
                     st.success("Informações atualizadas!")
                     st.rerun()
 
                 if b2.form_submit_button("🗑️ Remover Registo"):
                     df_existente = df_existente.drop(idx)
-                    conn.update(spreadsheet=URL_PLANILHA, worksheet="locais", data=df_existente)
+                    with st.spinner("A remover do Google Sheets..."):
+                        salvar_dados(df_existente)
                     st.warning("Condomínio removido da lista.")
                     st.rerun()
 
-    st.dataframe(df_existente, use_container_width=True)
+    st.dataframe(df_existente)
 
 elif aba == "🚚 Gerar Itinerário":
     st.header("Cálculo de Rota Económica (Menor Distância)")
