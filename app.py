@@ -14,7 +14,9 @@ try:
     
     credenciais = dict(st.secrets["minhas_credenciais"])
     credenciais["private_key"] = credenciais["private_key"].replace("\\n", "\n")
-    conn = st.connection("planilha_renove", type=GSheetsConnection, service_account_info=credenciais)
+    
+    # A correção está aqui: os asteriscos (**) desempacotam o dicionário perfeitamente
+    conn = st.connection("planilha_renove", type=GSheetsConnection, **credenciais)
 except Exception as e:
     st.error(f"⚠️ Erro ao aceder às credenciais: {e}")
     st.stop()
