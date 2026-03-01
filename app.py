@@ -6,21 +6,28 @@ import googlemaps
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Rota Inteligente - Renove", layout="wide")
 
-# Conexão com as Chaves de Segurança
+# --- 1. CONEXÃO COM PROTEÇÃO ANTIFALHA ---
 try:
     API_KEY = st.secrets["GOOGLE_MAPS_API_KEY"]
     gmaps = googlemaps.Client(key=API_KEY)
-    conn = st.connection("gsheets", type=GSheetsConnection)
+    
+    # O "Pulo do Gato": O código limpa as barras duplas invisíveis da sua chave
+    chave_bruta = st.secrets["connections"]["gsheets"]["private_key"]
+    chave_limpa = chave_bruta.replace("\\n", "\n").replace("\r", "")
+    
+    # O sistema se conecta usando a chave perfeitamente formatada
+    conn = st.connection("gsheets", type=GSheetsConnection, private_key=chave_limpa)
+    URL_PLANILHA = st.secrets["connections"]["gsheets"]["spreadsheet"]
 except Exception as e:
-    st.error("Erro ao carregar as chaves de segurança. Verifique o painel Secrets.")
+    st.error("Erro interno de chaves. Verifique o painel Secrets.")
     st.stop()
 
-# Função de busca protegida (aponta especificamente para a aba 'locais')
+# --- FUNÇÃO DE BUSCA SEGURA ---
 def buscar_dados():
     try:
-        return conn.read(worksheet="locais", ttl="0")
+        # Busca foca exclusivamente na aba de locais para evitar erros
+        return conn.read(spreadsheet=URL_PLANILHA, worksheet="locais", ttl="0")
     except Exception as e:
-        st.error(f"Erro ao ler a planilha: {e}")
         return pd.DataFrame(columns=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"])
 
 # --- SISTEMA DE LOGIN ---
@@ -35,8 +42,12 @@ if not st.session_state.logado:
             st.rerun()
     st.stop()
 
-# --- MENU ---
+# --- MENU PRINCIPAL ---
 st.sidebar.success("Sistema Renove Ativo")
+if st.sidebar.button("Sair"):
+    st.session_state.logado = False
+    st.rerun()
+
 aba = st.sidebar.radio("Navegação", ["📍 Cadastrar Locais", "🚚 Criar Rota Inteligente"])
 
 if aba == "📍 Cadastrar Locais":
@@ -57,12 +68,13 @@ if aba == "📍 Cadastrar Locais":
             estado = c2.text_input("ESTADO", value="PB")
             
             if st.form_submit_button("Salvar Local"):
-                if nome and rua: # Prevenção de campos vazios
+                if nome and rua:
                     novo = pd.DataFrame([[nome, rua, num, bairro, cidade, estado]], 
                                        columns=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"])
                     df_final = pd.concat([df_existente, novo], ignore_index=True)
-                    # Força a atualização apenas na aba correta
-                    conn.update(worksheet="locais", data=df_final)
+                    
+                    # Atualiza os dados na nuvem da Renove
+                    conn.update(spreadsheet=URL_PLANILHA, worksheet="locais", data=df_final)
                     st.success(f"'{nome}' cadastrado com sucesso!")
                     st.rerun()
                 else:
@@ -94,13 +106,13 @@ if aba == "📍 Cadastrar Locais":
 
                 if btn_atualizar:
                     df_existente.loc[idx_original] = [novo_nome, nova_rua, novo_num, novo_bairro, nova_cidade, novo_estado]
-                    conn.update(worksheet="locais", data=df_existente)
+                    conn.update(spreadsheet=URL_PLANILHA, worksheet="locais", data=df_existente)
                     st.success("Informações atualizadas!")
                     st.rerun()
 
                 if btn_excluir:
                     df_novo = df_existente.drop(idx_original)
-                    conn.update(worksheet="locais", data=df_novo)
+                    conn.update(spreadsheet=URL_PLANILHA, worksheet="locais", data=df_novo)
                     st.warning(f"'{selecionado}' removido com sucesso.")
                     st.rerun()
 
@@ -108,7 +120,6 @@ if aba == "📍 Cadastrar Locais":
     st.subheader("Base de Dados Atual")
     st.dataframe(df_existente, use_container_width=True)
 
-# --- ABA DE ROTAS ---
 elif aba == "🚚 Criar Rota Inteligente":
     st.header("Gerar Itinerário Econômico")
     df_locais = buscar_dados()
