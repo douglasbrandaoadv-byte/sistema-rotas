@@ -9,6 +9,7 @@ st.set_page_config(page_title="Rota Inteligente - Renove", layout="wide")
 # --- CONEXÃO DIRETA OFICIAL ---
 try:
     API_KEY = st.secrets["GOOGLE_MAPS_API_KEY"]
+    URL_PLANILHA = st.secrets["URL_PLANILHA"]
     gmaps = googlemaps.Client(key=API_KEY)
     
     credenciais = dict(st.secrets["minhas_credenciais"])
@@ -20,7 +21,7 @@ except Exception as e:
 
 def buscar_dados():
     try:
-        return conn.read(worksheet="locais", ttl="0")
+        return conn.read(spreadsheet=URL_PLANILHA, worksheet="locais", ttl="0")
     except Exception as e:
         st.warning("Planilha sem dados ou não acessível no momento.")
         return pd.DataFrame(columns=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"])
@@ -66,7 +67,7 @@ if aba == "📍 Gestão de Locais":
                     novo = pd.DataFrame([[nome, rua, num, bairro, cidade, estado]], 
                                        columns=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"])
                     df_final = pd.concat([df_existente, novo], ignore_index=True)
-                    conn.update(worksheet="locais", data=df_final)
+                    conn.update(spreadsheet=URL_PLANILHA, worksheet="locais", data=df_final)
                     st.success(f"Condomínio '{nome}' adicionado com sucesso!")
                     st.rerun()
 
@@ -92,13 +93,13 @@ if aba == "📍 Gestão de Locais":
                 b1, b2 = st.columns(2)
                 if b1.form_submit_button("✅ Guardar Alterações"):
                     df_existente.loc[idx] = [n_nome, n_rua, n_num, n_bair, n_cid, n_est]
-                    conn.update(worksheet="locais", data=df_existente)
+                    conn.update(spreadsheet=URL_PLANILHA, worksheet="locais", data=df_existente)
                     st.success("Informações atualizadas!")
                     st.rerun()
 
                 if b2.form_submit_button("🗑️ Remover Registo"):
                     df_existente = df_existente.drop(idx)
-                    conn.update(worksheet="locais", data=df_existente)
+                    conn.update(spreadsheet=URL_PLANILHA, worksheet="locais", data=df_existente)
                     st.warning("Condomínio removido da lista.")
                     st.rerun()
 
