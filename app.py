@@ -69,7 +69,6 @@ if aba == "📍 Gestão de Locais":
     st.header("Base de Dados de Condomínios")
     df_existente = buscar_dados()
     
-    # ADICIONAMOS A NOVA ABA DE "CADASTRO EM LOTE" AQUI
     tab_novo, tab_lote, tab_gerenciar = st.tabs(["➕ Adicionar Local", "📂 Cadastro em Lote", "⚙️ Editar/Eliminar"])
 
     with tab_novo:
@@ -94,43 +93,71 @@ if aba == "📍 Gestão de Locais":
                     st.success(f"Condomínio '{nome}' adicionado com sucesso!")
                     st.rerun()
 
-    # --- NOVA FUNCIONALIDADE: IMPORTAÇÃO DE PLANILHA ---
+    # --- ABA DE LOTE MELHORADA COM PLANILHA ONLINE ---
     with tab_lote:
-        st.info("💡 **Dica:** A sua planilha deve conter as seguintes colunas exatas na primeira linha: **NOME, RUA, NUMERO, BAIRRO, CIDADE, ESTADO**")
-        arquivo_up = st.file_uploader("Selecione a sua planilha (.csv ou .xlsx)", type=["csv", "xlsx"])
+        modo_lote = st.radio("Selecione o método de cadastro em lote:", 
+                             ["📝 Preencher Planilha Online", "📁 Upload de Arquivo (Excel/CSV)"])
         
-        if arquivo_up is not None:
-            try:
-                # O sistema deteta automaticamente se é Excel ou CSV
-                if arquivo_up.name.endswith('.csv'):
-                    df_lote = pd.read_csv(arquivo_up)
-                else:
-                    df_lote = pd.read_excel(arquivo_up)
+        if modo_lote == "📝 Preencher Planilha Online":
+            st.info("💡 **Dica:** Preencha os dados diretamente na grade abaixo. Para adicionar mais linhas, basta clicar na última linha vazia ou no ícone de '+' que aparece no final. Você também pode copiar e colar dados de fora.")
+            
+            # Cria 5 linhas em branco por padrão para facilitar a digitação
+            df_template = pd.DataFrame(
+                [["", "", "", "", "João Pessoa", "PB"]] * 5,
+                columns=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"]
+            )
+            
+            # Renderiza a planilha editável
+            df_editado = st.data_editor(df_template, num_rows="dynamic")
+            
+            if st.button("🚀 Cadastrar Todos da Planilha"):
+                # Limpa as linhas que o utilizador deixou em branco
+                df_valido = df_editado[df_editado["NOME"].str.strip() != ""]
                 
-                # Força todas as colunas da planilha enviada a ficarem maiúsculas para evitar erros de formatação
-                df_lote.columns = df_lote.columns.str.upper().str.strip()
-                colunas_obrigatorias = ["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"]
-                
-                # Verifica se o utilizador enviou as colunas corretas
-                if all(col in df_lote.columns for col in colunas_obrigatorias):
-                    st.write("🔎 **Pré-visualização dos dados a serem importados:**")
-                    st.dataframe(df_lote[colunas_obrigatorias].head(5))
+                if not df_valido.empty:
+                    # Junta os novos dados com os antigos e remove nomes duplicados
+                    df_final = pd.concat([df_existente, df_valido], ignore_index=True)
+                    df_final = df_final.drop_duplicates(subset=['NOME'], keep='last')
                     
-                    if st.button("🚀 Confirmar e Guardar Lote Inteiro"):
-                        # Junta a base de dados antiga com os novos dados
-                        df_final = pd.concat([df_existente, df_lote[colunas_obrigatorias]], ignore_index=True)
-                        # Remove possíveis linhas duplicadas (mesmo nome)
-                        df_final = df_final.drop_duplicates(subset=['NOME'], keep='last')
-                        
-                        with st.spinner("A processar e a enviar tudo para o Google Sheets..."):
-                            salvar_dados(df_final)
-                        
-                        st.success(f"✅ Sucesso! {len(df_lote)} locais importados de uma só vez.")
-                        st.rerun()
+                    with st.spinner("A enviar todos os registros para o banco de dados..."):
+                        salvar_dados(df_final)
+                    
+                    st.success(f"✅ Sucesso! {len(df_valido)} locais cadastrados de uma só vez.")
+                    st.rerun()
                 else:
-                    st.error("⚠️ ERRO: A sua planilha não contém as colunas corretas. Verifique o cabeçalho do arquivo.")
-            except Exception as e:
-                st.error(f"Erro ao ler o ficheiro. Confirme se é um Excel/CSV válido. Detalhe: {e}")
+                    st.warning("⚠️ Preencha pelo menos o 'NOME' de um local válido na planilha antes de cadastrar.")
+
+        else: # O modo antigo de Upload de Arquivo
+            st.info("💡 **Dica:** A sua planilha deve conter as seguintes colunas exatas na primeira linha: **NOME, RUA, NUMERO, BAIRRO, CIDADE, ESTADO**")
+            arquivo_up = st.file_uploader("Selecione a sua planilha (.csv ou .xlsx)", type=["csv", "xlsx"])
+            
+            if arquivo_up is not None:
+                try:
+                    if arquivo_up.name.endswith('.csv'):
+                        df_lote = pd.read_csv(arquivo_up)
+                    else:
+                        df_lote = pd.read_excel(arquivo_up)
+                    
+                    df_lote.columns = df_lote.columns.str.upper().str.strip()
+                    colunas_obrigatorias = ["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"]
+                    
+                    if all(col in df_lote.columns for col in colunas_obrigatorias):
+                        st.write("🔎 **Pré-visualização dos dados:**")
+                        st.dataframe(df_lote[colunas_obrigatorias].head(5))
+                        
+                        if st.button("🚀 Confirmar e Guardar Arquivo"):
+                            df_final = pd.concat([df_existente, df_lote[colunas_obrigatorias]], ignore_index=True)
+                            df_final = df_final.drop_duplicates(subset=['NOME'], keep='last')
+                            
+                            with st.spinner("A processar e a enviar tudo para o Google Sheets..."):
+                                salvar_dados(df_final)
+                            
+                            st.success(f"✅ Sucesso! {len(df_lote)} locais importados de uma só vez.")
+                            st.rerun()
+                    else:
+                        st.error("⚠️ ERRO: A sua planilha não contém as colunas corretas.")
+                except Exception as e:
+                    st.error(f"Erro ao ler o ficheiro: {e}")
 
     with tab_gerenciar:
         if df_existente.empty:
