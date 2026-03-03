@@ -52,6 +52,10 @@ if st.query_params.get("acesso") == "permitido":
 elif 'logado' not in st.session_state:
     st.session_state.logado = False
 
+# Variável para controlar a limpeza da planilha de lote
+if 'lote_key' not in st.session_state:
+    st.session_state.lote_key = 0
+
 if not st.session_state.logado:
     st.title("🔐 Acesso Restrito - Renove Administradora")
     if st.text_input("Insira a Senha", type="password") == "admin123":
@@ -77,7 +81,6 @@ if aba == "📍 Gestão de Locais":
     st.header("Base de Dados de Condomínios")
     df_existente = buscar_dados()
     
-    # Nova Aba adicionada: Empreendimentos Cadastrados
     tab_cadastrados, tab_novo, tab_lote, tab_gerenciar = st.tabs([
         "🏢 Empreendimentos Cadastrados", 
         "➕ Adicionar Local", 
@@ -127,7 +130,12 @@ if aba == "📍 Gestão de Locais":
                 columns=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"]
             )
             
-            df_editado = st.data_editor(df_template, num_rows="dynamic")
+            # Adicionada a chave dinâmica que permite recriar a tabela limpa
+            df_editado = st.data_editor(
+                df_template, 
+                num_rows="dynamic", 
+                key=f"tabela_lote_{st.session_state.lote_key}"
+            )
             
             if st.button("🚀 Cadastrar Todos da Planilha"):
                 df_valido = df_editado[df_editado["NOME"].str.strip() != ""]
@@ -140,6 +148,8 @@ if aba == "📍 Gestão de Locais":
                         salvar_dados(df_final)
                     
                     st.success(f"✅ Sucesso! {len(df_valido)} locais cadastrados de uma só vez.")
+                    # Altera a chave para limpar a tabela na próxima renderização
+                    st.session_state.lote_key += 1
                     st.rerun()
                 else:
                     st.warning("⚠️ Preencha pelo menos o 'NOME' de um local válido na planilha antes de cadastrar.")
@@ -397,7 +407,6 @@ elif aba == "📊 Relatórios de Rotas":
         else:
             df_hist = pd.DataFrame(dados_historico)
             
-            # Subdivisão em Abas para melhor visualização
             tab_geral, tab_agrupado, tab_edicao = st.tabs([
                 "📋 Histórico Geral", 
                 "📈 Relatório Agrupado", 
@@ -428,15 +437,13 @@ elif aba == "📊 Relatórios de Rotas":
                         mime="text/csv",
                     )
             
-            # --- ABA 2: RELATÓRIO AGRUPADO (NOVIDADE) ---
+            # --- ABA 2: RELATÓRIO AGRUPADO ---
             with tab_agrupado:
                 st.info("💡 **Dica:** Marque as caixas na coluna 'SELECIONAR' para escolher rotas específicas. O sistema irá somar a quilometragem e mostrar os condomínios mais visitados nas rotas escolhidas.")
                 
                 df_selecao = df_hist.copy()
-                # Insere a coluna de caixa de seleção no início
                 df_selecao.insert(0, "SELECIONAR", False)
                 
-                # Tabela editável para seleção
                 df_editado = st.data_editor(
                     df_selecao,
                     column_config={"SELECIONAR": st.column_config.CheckboxColumn(required=True)},
@@ -446,7 +453,6 @@ elif aba == "📊 Relatórios de Rotas":
                     key="editor_relatorio_agrupado"
                 )
                 
-                # Filtra apenas as linhas onde a caixa foi marcada
                 rotas_selecionadas = df_editado[df_editado["SELECIONAR"] == True]
                 
                 if not rotas_selecionadas.empty:
@@ -457,30 +463,24 @@ elif aba == "📊 Relatórios de Rotas":
                     todos_destinos = []
                     
                     for idx, row in rotas_selecionadas.iterrows():
-                        # Lógica para somar KM
                         km_val = row.get("KM TOTAL", "0")
                         try:
-                            # Limpa o texto "km" e converte vírgula para ponto caso haja
                             km_str = str(km_val).lower().replace('km', '').replace(',', '.').strip()
                             total_km += float(km_str)
                         except:
                             pass
                         
-                        # Lógica para contabilizar Destinos
                         rota_val = row.get("ROTA", "")
                         pedacos = str(rota_val).split(" ➔ ")
                         for p in pedacos:
-                            # Remove o emoji de alerta para não duplicar nomes na contagem
                             p_limpo = p.replace("🚨 ", "").strip()
                             if p_limpo and p_limpo != "Sede Renove" and p_limpo != row.get("PARTIDA", ""):
                                 todos_destinos.append(p_limpo)
                     
                     c_res1, c_res2 = st.columns(2)
                     
-                    # Exibe a soma de KM
                     c_res1.metric("🛣️ Quilometragem Total (Soma)", f"{total_km:.1f} km", f"{len(rotas_selecionadas)} rotas selecionadas")
                     
-                    # Exibe o ranking de destinos
                     if todos_destinos:
                         contagem = pd.Series(todos_destinos).value_counts().reset_index()
                         contagem.columns = ["Condomínio / Local", "Qtd. de Visitas"]
