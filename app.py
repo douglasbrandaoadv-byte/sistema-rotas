@@ -193,7 +193,6 @@ if aba == "📍 Gestão de Locais":
                     st.warning("Condomínio removido da lista.")
                     st.rerun()
 
-# --- NOVO FLUXO DE GERAR ITINERÁRIO (3 ETAPAS) ---
 elif aba == "🚚 Gerar Itinerário":
     st.header("Cálculo de Rota e Gestão de Urgências")
     df_locais = buscar_dados()
@@ -201,14 +200,12 @@ elif aba == "🚚 Gerar Itinerário":
     if df_locais.empty:
         st.warning("Adicione os condomínios na aba lateral antes de gerar rotas.")
     else:
-        # Sistema de controle de etapas da rota
         if 'etapa_rota' not in st.session_state:
             st.session_state.etapa_rota = 0
             st.session_state.rota_provisoria = []
             st.session_state.partida = ""
             st.session_state.historico_salvo = False
 
-        # ETAPA 0: PREENCHIMENTO DOS DADOS E URGÊNCIAS
         if st.session_state.etapa_rota == 0:
             qtd = st.number_input("Número de diligências hoje:", min_value=1, step=1)
             missoes = ["ENTREGA DE BOLETOS", "NOTIFICAÇÃO", "RECOLHER ATAS", "DOCUMENTOS", "FOLHA DE PAGAMENTO"]
@@ -216,7 +213,6 @@ elif aba == "🚚 Gerar Itinerário":
             selecionados = []
             for i in range(int(qtd)):
                 st.markdown("---")
-                # Criamos 4 colunas para acomodar a caixa de Urgência
                 c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
                 nome_sel = c1.selectbox(f"Diligência {i+1}", df_locais['NOME'].unique(), key=f"l_{i}")
                 missao_sel = c2.selectbox("Tarefa", missoes, key=f"m_{i}")
@@ -234,7 +230,6 @@ elif aba == "🚚 Gerar Itinerário":
                 with st.spinner("A consultar o Google Maps para sugerir o caminho mais rápido..."):
                     try:
                         waypoints = [s['endereco'] for s in selecionados]
-                        # O Google sugere a rota otimizada inicial
                         res = gmaps.directions(partida, destino_final_renove, waypoints=waypoints, optimize_waypoints=True)
                         
                         ordem_otimizada = res[0]['waypoint_order']
@@ -247,45 +242,57 @@ elif aba == "🚚 Gerar Itinerário":
                     except Exception as e:
                         st.error("Falha ao traçar rota. Confirme se as ruas cadastradas existem no mapa e tente novamente.")
 
-        # ETAPA 1: EDIÇÃO E REORDENAÇÃO DA ROTA PROVISÓRIA
+        # --- NOVA ETAPA 1 COM SETAS DE ORDENAÇÃO ---
         elif st.session_state.etapa_rota == 1:
             st.subheader("📋 Rota Provisória (Ajuste a Sequência se Necessário)")
-            st.info("Esta é a sequência mais curta sugerida pelo GPS. **Se precisar furar a fila por conta de uma urgência, altere os números na coluna 'ORDEM'.**")
+            st.info("Esta é a sequência mais curta sugerida pelo GPS. **Use as setas ⬆️ e ⬇️ para subir ou descer um local e furar a fila, caso haja uma urgência.**")
             
-            # Monta a tabela interativa
-            df_prov = pd.DataFrame([{
-                "ORDEM": i+1,
-                "URGÊNCIA": "🚨 SIM" if item["urgente"] else "",
-                "LOCAL": item["nome"],
-                "TAREFA": item["missao"],
-                "ENDEREÇO": item["endereco"],
-                "OBS": item["obs"]
-            } for i, item in enumerate(st.session_state.rota_provisoria)])
+            # Cabeçalhos da Tabela
+            hc1, hc2, hc3, hc4, hc5 = st.columns([0.8, 1.2, 1, 3, 3])
+            hc1.write("**ORDEM**")
+            hc2.write("**AÇÃO**")
+            hc3.write("**URGÊNCIA**")
+            hc4.write("**LOCAL**")
+            hc5.write("**ENDEREÇO**")
+            st.markdown("---")
             
-            df_editado = st.data_editor(
-                df_prov,
-                hide_index=True,
-                use_container_width=True,
-                disabled=["URGÊNCIA", "LOCAL", "TAREFA", "ENDEREÇO", "OBS"] # Bloqueia as outras colunas para evitar erros
-            )
+            # Renderiza cada local como uma linha com botões
+            for i, item in enumerate(st.session_state.rota_provisoria):
+                c1, c2, c3, c4, c5 = st.columns([0.8, 1.2, 1, 3, 3])
+                
+                # Número da Ordem
+                c1.markdown(f"<h4 style='margin-top:0px;'>{i+1}º</h4>", unsafe_allow_html=True)
+                
+                # Botões de Setas
+                with c2:
+                    sc1, sc2 = st.columns(2)
+                    with sc1:
+                        if st.button("⬆️", key=f"up_{i}", disabled=(i == 0), help="Subir"):
+                            st.session_state.rota_provisoria[i], st.session_state.rota_provisoria[i-1] = \
+                                st.session_state.rota_provisoria[i-1], st.session_state.rota_provisoria[i]
+                            st.rerun()
+                    with sc2:
+                        if st.button("⬇️", key=f"down_{i}", disabled=(i == len(st.session_state.rota_provisoria) - 1), help="Descer"):
+                            st.session_state.rota_provisoria[i], st.session_state.rota_provisoria[i+1] = \
+                                st.session_state.rota_provisoria[i+1], st.session_state.rota_provisoria[i]
+                            st.rerun()
+                
+                # Dados do Local
+                c3.write("🚨 SIM" if item["urgente"] else "")
+                c4.write(f"{item['nome']}\n\n*(Tarefa: {item['missao']})*")
+                c5.write(item["endereco"])
+                
+                st.markdown("---")
             
+            st.write("") # Espaço em branco
+            
+            # Botões de Confirmação
             c1, c2 = st.columns(2)
             with c1:
                 if st.button("✅ Confirmar Sequência e Finalizar Rota", type="primary"):
                     with st.spinner("A consolidar a rota final e a calcular a distância exata..."):
-                        # Reordena a rota de acordo com os números que o utilizador digitou
-                        df_final = df_editado.sort_values(by="ORDEM")
-                        rota_final = []
-                        for index, row in df_final.iterrows():
-                            rota_final.append({
-                                "nome": row["LOCAL"],
-                                "endereco": row["ENDEREÇO"],
-                                "missao": row["TAREFA"],
-                                "obs": row["OBS"],
-                                "urgente": True if "🚨" in row["URGÊNCIA"] else False
-                            })
-                            
-                        st.session_state.rota_final = rota_final
+                        # Como as setas já ajustaram a ordem direto na memória, basta avançar
+                        st.session_state.rota_final = st.session_state.rota_provisoria.copy()
                         st.session_state.etapa_rota = 2
                         st.rerun()
             with c2:
@@ -293,14 +300,12 @@ elif aba == "🚚 Gerar Itinerário":
                     st.session_state.etapa_rota = 0
                     st.rerun()
 
-        # ETAPA 2: ROTA FINALIZADA, LINK GPS E HISTÓRICO
         elif st.session_state.etapa_rota == 2:
             destino_final_renove = "Rua Rodrigues de Aquino, 267, Centro, João Pessoa, PB"
             partida = st.session_state.partida
             rota_final = st.session_state.rota_final
             
             try:
-                # Calculamos a distância exata da ordem que o utilizador escolheu manualmente
                 waypoints = [s['endereco'] for s in rota_final]
                 res = gmaps.directions(partida, destino_final_renove, waypoints=waypoints, optimize_waypoints=False)
                 
@@ -327,7 +332,6 @@ elif aba == "🚚 Gerar Itinerário":
                 nomes_rota_historico = []
                 
                 for i, item in enumerate(rota_final):
-                    # Adiciona visualmente a tag de urgência no relatório
                     tag_urgente = "🚨 **URGENTE** | " if item["urgente"] else ""
                     st.write(f"**{i+1}ª Parada - {item['nome']}** | {tag_urgente}🎯 {item['missao']}")
                     st.write(f"📍 {item['endereco']}")
@@ -335,14 +339,12 @@ elif aba == "🚚 Gerar Itinerário":
                         st.caption(f"📝 Obs: {item['obs']}")
                     st.divider()
                     
-                    # Para o histórico da planilha, coloca o emoji de sirene se for urgente
                     nome_hist = f"🚨 {item['nome']}" if item["urgente"] else item['nome']
                     nomes_rota_historico.append(nome_hist)
                 
                 st.success(f"🏁 **DESTINO FINAL:** Sede da Administradora ({destino_final_renove})")
                 nomes_rota_historico.append("Sede Renove")
                 
-                # Grava no histórico de planilhas apenas 1 vez
                 if not st.session_state.historico_salvo:
                     fuso_jp = pytz.timezone('America/Fortaleza')
                     agora = datetime.now(fuso_jp)
@@ -369,7 +371,6 @@ elif aba == "🚚 Gerar Itinerário":
             except Exception as e:
                 st.error(f"Falha ao processar rota final: {e}")
 
-# --- ABA DE RELATÓRIOS E GESTÃO DE HISTÓRICO ---
 elif aba == "📊 Relatórios de Rotas":
     st.header("Histórico e Gestão de Rotas")
     
@@ -381,7 +382,6 @@ elif aba == "📊 Relatórios de Rotas":
         else:
             df_hist = pd.DataFrame(dados_historico)
             
-            # --- ÁREA 1: VISUALIZAÇÃO GERAL E DOWNLOAD ---
             if 'DATA' in df_hist.columns:
                 datas_disponiveis = df_hist['DATA'].unique().tolist()
                 datas_disponiveis.reverse() 
@@ -406,7 +406,6 @@ elif aba == "📊 Relatórios de Rotas":
             
             st.divider()
             
-            # --- ÁREA 2: DETALHAMENTO E BUSCA INTELIGENTE ---
             st.subheader("⚙️ Detalhar, Editar ou Excluir Rotas")
             
             termo_busca = st.text_input("🔍 Buscar Rota (Digite a Data ou o Nome do Local):", "").strip().lower()
