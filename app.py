@@ -70,11 +70,28 @@ if st.sidebar.button("Terminar Sessão"):
 
 aba = st.sidebar.radio("Navegação", ["📍 Gestão de Locais", "🚚 Gerar Itinerário", "📊 Relatórios de Rotas"])
 
+# ==========================================================
+# MENU 1: GESTÃO DE LOCAIS
+# ==========================================================
 if aba == "📍 Gestão de Locais":
     st.header("Base de Dados de Condomínios")
     df_existente = buscar_dados()
     
-    tab_novo, tab_lote, tab_gerenciar = st.tabs(["➕ Adicionar Local", "📂 Cadastro em Lote", "⚙️ Editar/Eliminar"])
+    # Nova Aba adicionada: Empreendimentos Cadastrados
+    tab_cadastrados, tab_novo, tab_lote, tab_gerenciar = st.tabs([
+        "🏢 Empreendimentos Cadastrados", 
+        "➕ Adicionar Local", 
+        "📂 Cadastro em Lote", 
+        "⚙️ Editar/Eliminar"
+    ])
+
+    with tab_cadastrados:
+        st.subheader("Lista de Empreendimentos")
+        if df_existente.empty:
+            st.info("A base de dados encontra-se vazia.")
+        else:
+            st.dataframe(df_existente, use_container_width=True, hide_index=True)
+            st.caption(f"📊 Total de locais cadastrados: {len(df_existente)}")
 
     with tab_novo:
         with st.form("form_novo"):
@@ -193,6 +210,9 @@ if aba == "📍 Gestão de Locais":
                     st.warning("Condomínio removido da lista.")
                     st.rerun()
 
+# ==========================================================
+# MENU 2: GERAR ITINERÁRIO
+# ==========================================================
 elif aba == "🚚 Gerar Itinerário":
     st.header("Cálculo de Rota e Gestão de Urgências")
     df_locais = buscar_dados()
@@ -242,12 +262,10 @@ elif aba == "🚚 Gerar Itinerário":
                     except Exception as e:
                         st.error("Falha ao traçar rota. Confirme se as ruas cadastradas existem no mapa e tente novamente.")
 
-        # --- NOVA ETAPA 1 COM SETAS DE ORDENAÇÃO ---
         elif st.session_state.etapa_rota == 1:
             st.subheader("📋 Rota Provisória (Ajuste a Sequência se Necessário)")
             st.info("Esta é a sequência mais curta sugerida pelo GPS. **Use as setas ⬆️ e ⬇️ para subir ou descer um local e furar a fila, caso haja uma urgência.**")
             
-            # Cabeçalhos da Tabela
             hc1, hc2, hc3, hc4, hc5 = st.columns([0.8, 1.2, 1, 3, 3])
             hc1.write("**ORDEM**")
             hc2.write("**AÇÃO**")
@@ -256,14 +274,11 @@ elif aba == "🚚 Gerar Itinerário":
             hc5.write("**ENDEREÇO**")
             st.markdown("---")
             
-            # Renderiza cada local como uma linha com botões
             for i, item in enumerate(st.session_state.rota_provisoria):
                 c1, c2, c3, c4, c5 = st.columns([0.8, 1.2, 1, 3, 3])
                 
-                # Número da Ordem
                 c1.markdown(f"<h4 style='margin-top:0px;'>{i+1}º</h4>", unsafe_allow_html=True)
                 
-                # Botões de Setas
                 with c2:
                     sc1, sc2 = st.columns(2)
                     with sc1:
@@ -277,21 +292,18 @@ elif aba == "🚚 Gerar Itinerário":
                                 st.session_state.rota_provisoria[i+1], st.session_state.rota_provisoria[i]
                             st.rerun()
                 
-                # Dados do Local
                 c3.write("🚨 SIM" if item["urgente"] else "")
                 c4.write(f"{item['nome']}\n\n*(Tarefa: {item['missao']})*")
                 c5.write(item["endereco"])
                 
                 st.markdown("---")
             
-            st.write("") # Espaço em branco
+            st.write("") 
             
-            # Botões de Confirmação
             c1, c2 = st.columns(2)
             with c1:
                 if st.button("✅ Confirmar Sequência e Finalizar Rota", type="primary"):
                     with st.spinner("A consolidar a rota final e a calcular a distância exata..."):
-                        # Como as setas já ajustaram a ordem direto na memória, basta avançar
                         st.session_state.rota_final = st.session_state.rota_provisoria.copy()
                         st.session_state.etapa_rota = 2
                         st.rerun()
@@ -371,6 +383,9 @@ elif aba == "🚚 Gerar Itinerário":
             except Exception as e:
                 st.error(f"Falha ao processar rota final: {e}")
 
+# ==========================================================
+# MENU 3: RELATÓRIOS E GESTÃO DE HISTÓRICO
+# ==========================================================
 elif aba == "📊 Relatórios de Rotas":
     st.header("Histórico e Gestão de Rotas")
     
@@ -382,97 +397,165 @@ elif aba == "📊 Relatórios de Rotas":
         else:
             df_hist = pd.DataFrame(dados_historico)
             
-            if 'DATA' in df_hist.columns:
-                datas_disponiveis = df_hist['DATA'].unique().tolist()
-                datas_disponiveis.reverse() 
-                
-                c1, c2 = st.columns([3, 1])
-                with c1:
-                    data_selecionada = st.selectbox("📅 Filtrar tabela por Data:", ["Todas as Datas"] + datas_disponiveis)
-                
-                df_exibicao = df_hist.copy()
-                if data_selecionada != "Todas as Datas":
-                    df_exibicao = df_exibicao[df_exibicao['DATA'] == data_selecionada]
+            # Subdivisão em Abas para melhor visualização
+            tab_geral, tab_agrupado, tab_edicao = st.tabs([
+                "📋 Histórico Geral", 
+                "📈 Relatório Agrupado", 
+                "⚙️ Detalhar e Editar"
+            ])
             
-                st.dataframe(df_exibicao, use_container_width=True, hide_index=True)
+            # --- ABA 1: HISTÓRICO GERAL ---
+            with tab_geral:
+                if 'DATA' in df_hist.columns:
+                    datas_disponiveis = df_hist['DATA'].unique().tolist()
+                    datas_disponiveis.reverse() 
+                    
+                    c1, c2 = st.columns([3, 1])
+                    with c1:
+                        data_selecionada = st.selectbox("📅 Filtrar tabela por Data:", ["Todas as Datas"] + datas_disponiveis)
+                    
+                    df_exibicao = df_hist.copy()
+                    if data_selecionada != "Todas as Datas":
+                        df_exibicao = df_exibicao[df_exibicao['DATA'] == data_selecionada]
                 
-                csv = df_exibicao.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="📥 Descarregar Tabela em CSV",
-                    data=csv,
-                    file_name=f"relatorio_rotas_{data_selecionada.replace('/', '-')}.csv" if data_selecionada != "Todas as Datas" else "relatorio_rotas_todas.csv",
-                    mime="text/csv",
+                    st.dataframe(df_exibicao, use_container_width=True, hide_index=True)
+                    
+                    csv = df_exibicao.to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        label="📥 Descarregar Tabela em CSV",
+                        data=csv,
+                        file_name=f"relatorio_rotas_{data_selecionada.replace('/', '-')}.csv" if data_selecionada != "Todas as Datas" else "relatorio_rotas_todas.csv",
+                        mime="text/csv",
+                    )
+            
+            # --- ABA 2: RELATÓRIO AGRUPADO (NOVIDADE) ---
+            with tab_agrupado:
+                st.info("💡 **Dica:** Marque as caixas na coluna 'SELECIONAR' para escolher rotas específicas. O sistema irá somar a quilometragem e mostrar os condomínios mais visitados nas rotas escolhidas.")
+                
+                df_selecao = df_hist.copy()
+                # Insere a coluna de caixa de seleção no início
+                df_selecao.insert(0, "SELECIONAR", False)
+                
+                # Tabela editável para seleção
+                df_editado = st.data_editor(
+                    df_selecao,
+                    column_config={"SELECIONAR": st.column_config.CheckboxColumn(required=True)},
+                    disabled=["DATA", "HORA", "PARTIDA", "ROTA", "KM TOTAL"],
+                    hide_index=True,
+                    use_container_width=True,
+                    key="editor_relatorio_agrupado"
                 )
-            
-            st.divider()
-            
-            st.subheader("⚙️ Detalhar, Editar ou Excluir Rotas")
-            
-            termo_busca = st.text_input("🔍 Buscar Rota (Digite a Data ou o Nome do Local):", "").strip().lower()
-            
-            opcoes_rotas = []
-            for idx, row in enumerate(dados_historico):
-                linha_sheets = idx + 2
                 
-                data_rota = str(row.get('DATA', '')).lower()
-                locais_rota = str(row.get('ROTA', '')).lower()
+                # Filtra apenas as linhas onde a caixa foi marcada
+                rotas_selecionadas = df_editado[df_editado["SELECIONAR"] == True]
                 
-                if termo_busca in data_rota or termo_busca in locais_rota:
-                    texto_resumo = f"{row.get('DATA', '')} às {row.get('HORA', '')} | {row.get('KM TOTAL', '')} | {str(row.get('ROTA', ''))[:60]}..."
-                    opcoes_rotas.append((linha_sheets, texto_resumo, row))
+                if not rotas_selecionadas.empty:
+                    st.divider()
+                    st.subheader("📊 Resultados do Relatório")
+                    
+                    total_km = 0.0
+                    todos_destinos = []
+                    
+                    for idx, row in rotas_selecionadas.iterrows():
+                        # Lógica para somar KM
+                        km_val = row.get("KM TOTAL", "0")
+                        try:
+                            # Limpa o texto "km" e converte vírgula para ponto caso haja
+                            km_str = str(km_val).lower().replace('km', '').replace(',', '.').strip()
+                            total_km += float(km_str)
+                        except:
+                            pass
+                        
+                        # Lógica para contabilizar Destinos
+                        rota_val = row.get("ROTA", "")
+                        pedacos = str(rota_val).split(" ➔ ")
+                        for p in pedacos:
+                            # Remove o emoji de alerta para não duplicar nomes na contagem
+                            p_limpo = p.replace("🚨 ", "").strip()
+                            if p_limpo and p_limpo != "Sede Renove" and p_limpo != row.get("PARTIDA", ""):
+                                todos_destinos.append(p_limpo)
+                    
+                    c_res1, c_res2 = st.columns(2)
+                    
+                    # Exibe a soma de KM
+                    c_res1.metric("🛣️ Quilometragem Total (Soma)", f"{total_km:.1f} km", f"{len(rotas_selecionadas)} rotas selecionadas")
+                    
+                    # Exibe o ranking de destinos
+                    if todos_destinos:
+                        contagem = pd.Series(todos_destinos).value_counts().reset_index()
+                        contagem.columns = ["Condomínio / Local", "Qtd. de Visitas"]
+                        c_res2.write("**🏆 Locais mais frequentes:**")
+                        c_res2.dataframe(contagem, hide_index=True, use_container_width=True)
+
+            # --- ABA 3: DETALHAR, EDITAR E EXCLUIR ---
+            with tab_edicao:
+                st.subheader("⚙️ Detalhar, Editar ou Excluir Rotas")
                 
-            opcoes_rotas.reverse()
-            
-            if not opcoes_rotas:
-                st.warning("Nenhuma rota encontrada com esse termo de busca.")
-            else:
-                rota_selecionada = st.selectbox("Selecione a rota que deseja gerenciar:", opcoes_rotas, format_func=lambda x: x[1])
+                termo_busca = st.text_input("🔍 Buscar Rota (Digite a Data ou o Nome do Local):", "").strip().lower()
                 
-                if rota_selecionada:
-                    linha_alvo, resumo, dados = rota_selecionada
+                opcoes_rotas = []
+                for idx, row in enumerate(dados_historico):
+                    linha_sheets = idx + 2
                     
-                    st.write("### 🔎 Detalhes da Rota")
-                    c_detalhe1, c_detalhe2 = st.columns(2)
-                    with c_detalhe1:
-                        st.info(f"📅 **Data:** {dados.get('DATA', '')}\n\n"
-                                f"⏰ **Hora:** {dados.get('HORA', '')}\n\n"
-                                f"📍 **Partida:** {dados.get('PARTIDA', '')}\n\n"
-                                f"📏 **Distância:** {dados.get('KM TOTAL', '')}")
+                    data_rota = str(row.get('DATA', '')).lower()
+                    locais_rota = str(row.get('ROTA', '')).lower()
                     
-                    with c_detalhe2:
-                        st.success("**Ordem dos Destinos:**")
-                        destinos = str(dados.get('ROTA', '')).split(" ➔ ")
-                        for i, destino in enumerate(destinos):
-                            st.write(f"{i+1}º ➔ {destino}")
+                    if termo_busca in data_rota or termo_busca in locais_rota:
+                        texto_resumo = f"{row.get('DATA', '')} às {row.get('HORA', '')} | {row.get('KM TOTAL', '')} | {str(row.get('ROTA', ''))[:60]}..."
+                        opcoes_rotas.append((linha_sheets, texto_resumo, row))
                     
-                    st.write("### 🛠️ Ações")
-                    col_edit, col_del = st.columns(2)
+                opcoes_rotas.reverse()
+                
+                if not opcoes_rotas:
+                    st.warning("Nenhuma rota encontrada com esse termo de busca.")
+                else:
+                    rota_selecionada = st.selectbox("Selecione a rota que deseja gerenciar:", opcoes_rotas, format_func=lambda x: x[1])
                     
-                    with col_edit:
-                        with st.expander("✏️ Editar Informações desta Rota"):
-                            with st.form("form_edita_rota"):
-                                n_data = st.text_input("Data", value=dados.get('DATA', ''))
-                                n_hora = st.text_input("Hora", value=dados.get('HORA', ''))
-                                n_partida = st.text_input("Partida", value=dados.get('PARTIDA', ''))
-                                n_rota = st.text_area("Rota (Mantenha a seta ' ➔ ' entre os locais)", value=dados.get('ROTA', ''))
-                                n_km = st.text_input("KM Total", value=dados.get('KM TOTAL', ''))
-                                
-                                if st.form_submit_button("Guardar Alterações"):
-                                    try:
-                                        aba_historico.update(f"A{linha_alvo}:E{linha_alvo}", [[n_data, n_hora, n_partida, n_rota, n_km]])
-                                        st.success("Rota atualizada com sucesso no banco de dados!")
-                                        st.rerun()
-                                    except Exception as e:
-                                        st.error(f"Erro ao atualizar: {e}")
-                    
-                    with col_del:
-                        if st.button("🗑️ Excluir esta Rota Definitivamente", type="primary"):
-                            try:
-                                aba_historico.delete_rows(linha_alvo)
-                                st.warning("A rota foi apagada do histórico.")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Erro ao excluir: {e}")
+                    if rota_selecionada:
+                        linha_alvo, resumo, dados = rota_selecionada
+                        
+                        st.write("### 🔎 Detalhes da Rota")
+                        c_detalhe1, c_detalhe2 = st.columns(2)
+                        with c_detalhe1:
+                            st.info(f"📅 **Data:** {dados.get('DATA', '')}\n\n"
+                                    f"⏰ **Hora:** {dados.get('HORA', '')}\n\n"
+                                    f"📍 **Partida:** {dados.get('PARTIDA', '')}\n\n"
+                                    f"📏 **Distância:** {dados.get('KM TOTAL', '')}")
+                        
+                        with c_detalhe2:
+                            st.success("**Ordem dos Destinos:**")
+                            destinos = str(dados.get('ROTA', '')).split(" ➔ ")
+                            for i, destino in enumerate(destinos):
+                                st.write(f"{i+1}º ➔ {destino}")
+                        
+                        st.write("### 🛠️ Ações")
+                        col_edit, col_del = st.columns(2)
+                        
+                        with col_edit:
+                            with st.expander("✏️ Editar Informações desta Rota"):
+                                with st.form("form_edita_rota"):
+                                    n_data = st.text_input("Data", value=dados.get('DATA', ''))
+                                    n_hora = st.text_input("Hora", value=dados.get('HORA', ''))
+                                    n_partida = st.text_input("Partida", value=dados.get('PARTIDA', ''))
+                                    n_rota = st.text_area("Rota (Mantenha a seta ' ➔ ' entre os locais)", value=dados.get('ROTA', ''))
+                                    n_km = st.text_input("KM Total", value=dados.get('KM TOTAL', ''))
+                                    
+                                    if st.form_submit_button("Guardar Alterações"):
+                                        try:
+                                            aba_historico.update(f"A{linha_alvo}:E{linha_alvo}", [[n_data, n_hora, n_partida, n_rota, n_km]])
+                                            st.success("Rota atualizada com sucesso no banco de dados!")
+                                            st.rerun()
+                                        except Exception as e:
+                                            st.error(f"Erro ao atualizar: {e}")
+                        
+                        with col_del:
+                            if st.button("🗑️ Excluir esta Rota Definitivamente", type="primary"):
+                                try:
+                                    aba_historico.delete_rows(linha_alvo)
+                                    st.warning("A rota foi apagada do histórico.")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Erro ao excluir: {e}")
             
     except Exception as e:
         st.error(f"⚠️ Ocorreu um erro ao ler o histórico. Verifique se a aba 'historico_rotas' possui as colunas exatas: DATA | HORA | PARTIDA | ROTA | KM TOTAL. Detalhe: {e}")
