@@ -24,9 +24,10 @@ try:
     
     aba_banco = planilha.worksheet("locais")
     aba_historico = planilha.worksheet("historico_rotas")
+    aba_veiculo = planilha.worksheet("historico_veiculo") # Conexão com a nova aba
     
 except Exception as e:
-    st.error(f"⚠️ Erro ao aceder ao sistema do Google: {e}")
+    st.error(f"⚠️ Erro ao aceder ao sistema do Google. Verifique se criou a aba 'historico_veiculo'. Detalhe: {e}")
     st.stop()
 
 # --- SISTEMA DE CACHE PARA PROTEGER CONTRA BLOQUEIOS DO GOOGLE ---
@@ -41,18 +42,24 @@ def buscar_dados():
         df.columns = df.columns.str.upper() 
         return df
     except Exception as e:
-        st.error(f"⚠️ Detalhe do bloqueio ao ler: {e}")
         return pd.DataFrame(columns=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"])
 
 def salvar_dados(df):
     aba_banco.clear()
     set_with_dataframe(aba_banco, df)
-    buscar_dados.clear() # Limpa a memória para forçar uma nova leitura atualizada
+    buscar_dados.clear()
 
 @st.cache_data(ttl=600, show_spinner=False)
 def buscar_historico():
     try:
         return aba_historico.get_all_records()
+    except Exception as e:
+        return []
+
+@st.cache_data(ttl=600, show_spinner=False)
+def buscar_veiculo():
+    try:
+        return aba_veiculo.get_all_records()
     except Exception as e:
         return []
 
@@ -81,7 +88,14 @@ if st.sidebar.button("Terminar Sessão"):
     st.query_params.clear()
     st.rerun()
 
-aba = st.sidebar.radio("Navegação", ["📍 Gestão de Locais", "🚚 Gerar Itinerário", "📊 Relatórios de Rotas"])
+# Menus atualizados com as novas funcionalidades
+aba = st.sidebar.radio("Navegação", [
+    "📍 Gestão de Locais", 
+    "🚚 Gerar Itinerário", 
+    "📊 Relatórios de Rotas",
+    "🏍️ Dados do Veículo",
+    "📑 Relatório de Veículos"
+])
 
 # ==========================================================
 # MENU 1: GESTÃO DE LOCAIS
@@ -428,7 +442,7 @@ elif aba == "🚚 Gerar Itinerário":
                 st.error(f"Falha ao processar rota final: {e}")
 
 # ==========================================================
-# MENU 3: RELATÓRIOS E GESTÃO DE HISTÓRICO
+# MENU 3: RELATÓRIOS DE ROTAS
 # ==========================================================
 elif aba == "📊 Relatórios de Rotas":
     st.header("Histórico e Gestão de Rotas")
@@ -447,7 +461,6 @@ elif aba == "📊 Relatórios de Rotas":
                 "⚙️ Detalhar e Editar"
             ])
             
-            # --- ABA 1: HISTÓRICO GERAL ---
             with tab_geral:
                 if 'DATA' in df_hist.columns:
                     datas_disponiveis = df_hist['DATA'].unique().tolist()
@@ -471,7 +484,6 @@ elif aba == "📊 Relatórios de Rotas":
                         mime="text/csv",
                     )
             
-            # --- ABA 2: RELATÓRIO AGRUPADO ---
             with tab_agrupado:
                 st.info("💡 **Dica:** Marque as caixas na coluna 'SELECIONAR' para escolher rotas específicas. O sistema irá somar a quilometragem e mostrar os condomínios mais visitados nas rotas escolhidas.")
                 
@@ -521,7 +533,6 @@ elif aba == "📊 Relatórios de Rotas":
                         c_res2.write("**🏆 Locais mais frequentes:**")
                         c_res2.dataframe(contagem, hide_index=True, use_container_width=True)
 
-            # --- ABA 3: DETALHAR, EDITAR E EXCLUIR ---
             with tab_edicao:
                 st.subheader("⚙️ Detalhar, Editar ou Excluir Rotas")
                 
@@ -595,3 +606,119 @@ elif aba == "📊 Relatórios de Rotas":
             
     except Exception as e:
         st.error(f"⚠️ Ocorreu um erro ao ler o histórico. Verifique se a aba 'historico_rotas' possui as colunas exatas: DATA | HORA | PARTIDA | ROTA | KM TOTAL. Detalhe: {e}")
+
+# ==========================================================
+# MENU 4: DADOS DO VEÍCULO (NOVO)
+# ==========================================================
+elif aba == "🏍️ Dados do Veículo":
+    st.header("Registo Diário da Frota")
+    st.info("Preencha as informações do veículo no início ou final do expediente.")
+    
+    with st.form("form_dados_veiculo"):
+        fuso_jp = pytz.timezone('America/Fortaleza')
+        data_hoje = datetime.now(fuso_jp).date()
+        
+        c1, c2 = st.columns(2)
+        data_registo = c1.date_input("Data do Registo", value=data_hoje, format="DD/MM/YYYY")
+        km_inicial = c2.number_input("Kilometragem do Painel (KM)", min_value=0, step=1, help="Insira a quilometragem exibida no painel da moto.")
+        
+        st.write("---")
+        st.subheader("Combustível")
+        abasteceu = st.checkbox("Houve abastecimento neste dia?")
+        
+        # O campo de valor sempre existe, mas o utilizador preenche se abasteceu
+        valor_abast = st.number_input("Valor total do abastecimento (R$)", min_value=0.0, step=0.01, format="%.2f", help="Se não houve abastecimento, deixe em 0.00")
+        
+        if st.form_submit_button("💾 Guardar Registo Diário", type="primary"):
+            data_str = data_registo.strftime("%d/%m/%Y")
+            valor_final = valor_abast if abasteceu else 0.0
+            linha_veiculo = [data_str, km_inicial, "SIM" if abasteceu else "NÃO", valor_final]
+            
+            try:
+                aba_veiculo.append_row(linha_veiculo)
+                buscar_veiculo.clear() # Atualiza a cache
+                st.success("✅ Informações do veículo registadas com sucesso no banco de dados!")
+            except Exception as e:
+                st.error(f"Erro ao guardar os dados. Verifique a aba 'historico_veiculo'. Detalhe: {e}")
+
+# ==========================================================
+# MENU 5: RELATÓRIOS DE VEÍCULOS (NOVO)
+# ==========================================================
+elif aba == "📑 Relatório de Veículos":
+    st.header("Relatório Financeiro e de Rodagem")
+    st.write("Selecione um período para cruzar as rotas percorridas com os gastos de combustível.")
+    
+    # Seleção de Data
+    datas = st.date_input("Selecione o Período (Data Inicial e Final):", value=[], format="DD/MM/YYYY")
+    
+    if len(datas) == 2:
+        data_inicio, data_fim = datas
+        
+        dados_rotas = buscar_historico()
+        dados_veiculo = buscar_veiculo()
+        
+        df_rotas = pd.DataFrame(dados_rotas)
+        df_veic = pd.DataFrame(dados_veiculo)
+        
+        if df_rotas.empty and df_veic.empty:
+            st.warning("Não há dados suficientes registados neste período.")
+        else:
+            total_km_rotas = 0.0
+            total_gasto_combustivel = 0.0
+            
+            # --- 1. Filtro e Cálculo das Rotas (KM) ---
+            if not df_rotas.empty and 'DATA' in df_rotas.columns:
+                # Converte as datas da planilha para objetos 'Date' comparáveis
+                df_rotas['Data_Parsed'] = pd.to_datetime(df_rotas['DATA'], format='%d/%m/%Y', errors='coerce').dt.date
+                
+                # Filtra o período
+                mask_rotas = (df_rotas['Data_Parsed'] >= data_inicio) & (df_rotas['Data_Parsed'] <= data_fim)
+                df_rotas_filtrado = df_rotas[mask_rotas]
+                
+                # Soma a Quilometragem
+                for km_str in df_rotas_filtrado.get('KM TOTAL', []):
+                    try:
+                        km_limpo = str(km_str).lower().replace('km', '').replace(',', '.').strip()
+                        total_km_rotas += float(km_limpo)
+                    except:
+                        pass
+
+            # --- 2. Filtro e Cálculo do Veículo (Abastecimento) ---
+            if not df_veic.empty and 'DATA' in df_veic.columns:
+                df_veic['Data_Parsed'] = pd.to_datetime(df_veic['DATA'], format='%d/%m/%Y', errors='coerce').dt.date
+                
+                mask_veic = (df_veic['Data_Parsed'] >= data_inicio) & (df_veic['Data_Parsed'] <= data_fim)
+                df_veic_filtrado = df_veic[mask_veic]
+                
+                # Soma os Valores
+                df_veic_filtrado['VALOR'] = pd.to_numeric(df_veic_filtrado.get('VALOR', 0), errors='coerce').fillna(0)
+                total_gasto_combustivel = df_veic_filtrado['VALOR'].sum()
+            
+            # --- EXIBIÇÃO DO PAINEL DE RESULTADOS ---
+            st.divider()
+            st.subheader(f"📊 Resumo do Período: {data_inicio.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')}")
+            
+            c1, c2 = st.columns(2)
+            
+            # Métrica de Distância (Baseada nas rotas do GPS)
+            c1.metric(
+                label="🛣️ Total Percorrido em Rotas (GPS)", 
+                value=f"{total_km_rotas:.1f} km"
+            )
+            
+            # Métrica de Combustível
+            c2.metric(
+                label="⛽ Gasto Total com Combustível", 
+                value=f"R$ {total_gasto_combustivel:.2f}"
+            )
+            
+            # Tabela de detalhamento dos abastecimentos no período
+            if not df_veic.empty and not df_veic_filtrado.empty:
+                st.write("### 📝 Detalhamento Diário do Veículo")
+                
+                # Remove a coluna temporária de data que criámos apenas para o filtro e mostra a tabela
+                tabela_exibicao = df_veic_filtrado.drop(columns=['Data_Parsed'], errors='ignore')
+                st.dataframe(tabela_exibicao, hide_index=True, use_container_width=True)
+    
+    elif len(datas) == 1:
+        st.info("📅 Selecione a **data final** no calendário para gerar o relatório.")
