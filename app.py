@@ -193,74 +193,157 @@ if aba == "📍 Gestão de Locais":
                     st.warning("Condomínio removido da lista.")
                     st.rerun()
 
+# --- NOVO FLUXO DE GERAR ITINERÁRIO (3 ETAPAS) ---
 elif aba == "🚚 Gerar Itinerário":
-    st.header("Cálculo de Rota Económica (Menor Distância)")
+    st.header("Cálculo de Rota e Gestão de Urgências")
     df_locais = buscar_dados()
     
     if df_locais.empty:
         st.warning("Adicione os condomínios na aba lateral antes de gerar rotas.")
     else:
-        qtd = st.number_input("Número de diligências hoje:", min_value=1, step=1)
-        missoes = ["ENTREGA DE BOLETOS", "NOTIFICAÇÃO", "RECOLHER ATAS", "DOCUMENTOS", "FOLHA DE PAGAMENTO"]
-        
-        selecionados = []
-        for i in range(int(qtd)):
-            st.markdown("---")
-            c1, c2, c3 = st.columns(3)
-            nome_sel = c1.selectbox(f"Diligência {i+1}", df_locais['NOME'].unique(), key=f"l_{i}")
-            missao_sel = c2.selectbox("Tarefa", missoes, key=f"m_{i}")
-            obs = c3.text_input("Observações (Opcional)", key=f"o_{i}")
+        # Sistema de controle de etapas da rota
+        if 'etapa_rota' not in st.session_state:
+            st.session_state.etapa_rota = 0
+            st.session_state.rota_provisoria = []
+            st.session_state.partida = ""
+            st.session_state.historico_salvo = False
+
+        # ETAPA 0: PREENCHIMENTO DOS DADOS E URGÊNCIAS
+        if st.session_state.etapa_rota == 0:
+            qtd = st.number_input("Número de diligências hoje:", min_value=1, step=1)
+            missoes = ["ENTREGA DE BOLETOS", "NOTIFICAÇÃO", "RECOLHER ATAS", "DOCUMENTOS", "FOLHA DE PAGAMENTO"]
             
-            row = df_locais[df_locais['NOME'] == nome_sel].iloc[0]
-            end = f"{row['RUA']}, {row['NUMERO']}, {row['BAIRRO']}, {row['CIDADE']}, {row['ESTADO']}"
-            selecionados.append({"nome": nome_sel, "endereco": end, "missao": missao_sel, "obs": obs})
+            selecionados = []
+            for i in range(int(qtd)):
+                st.markdown("---")
+                # Criamos 4 colunas para acomodar a caixa de Urgência
+                c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
+                nome_sel = c1.selectbox(f"Diligência {i+1}", df_locais['NOME'].unique(), key=f"l_{i}")
+                missao_sel = c2.selectbox("Tarefa", missoes, key=f"m_{i}")
+                obs = c3.text_input("Observações (Opcional)", key=f"o_{i}")
+                urgente = c4.checkbox("🚨 URGÊNCIA", key=f"u_{i}")
+                
+                row = df_locais[df_locais['NOME'] == nome_sel].iloc[0]
+                end = f"{row['RUA']}, {row['NUMERO']}, {row['BAIRRO']}, {row['CIDADE']}, {row['ESTADO']}"
+                selecionados.append({"nome": nome_sel, "endereco": end, "missao": missao_sel, "obs": obs, "urgente": urgente})
 
-        partida = st.text_input("Ponto de Partida (Onde o motoboy está agora):", value="João Pessoa, PB")
-        
-        destino_final_renove = "Rua Rodrigues de Aquino, 267, Centro, João Pessoa, PB"
+            partida = st.text_input("Ponto de Partida (Onde o motoboy está agora):", value="João Pessoa, PB")
+            destino_final_renove = "Rua Rodrigues de Aquino, 267, Centro, João Pessoa, PB"
 
-        if st.button("🚀 Otimizar Rota (Google Maps)"):
-            with st.spinner("A calcular o caminho mais rápido e económico..."):
-                try:
-                    waypoints = [s['endereco'] for s in selecionados]
-                    res = gmaps.directions(partida, destino_final_renove, waypoints=waypoints, optimize_waypoints=True)
-                    
-                    ordem_otimizada = res[0]['waypoint_order']
-                    rota_ordenada = [selecionados[i] for i in ordem_otimizada]
-                    
-                    distancia_total_metros = 0
-                    for leg in res[0]['legs']:
-                        distancia_total_metros += leg['distance']['value']
-                    
-                    distancia_total_km = round(distancia_total_metros / 1000, 1)
-                    distancia_texto = f"{distancia_total_km} km"
-                    
-                    st.success(f"Trajeto mais económico calculado com sucesso! (Distância total: {distancia_texto})")
-                    
-                    url_partida = urllib.parse.quote(partida)
-                    url_paradas = "/".join([urllib.parse.quote(s['endereco']) for s in rota_ordenada])
-                    url_destino = urllib.parse.quote(destino_final_renove)
-                    
-                    link = f"https://www.google.com/maps/dir/{url_partida}/{url_paradas}/{url_destino}"
-                    
-                    st.link_button("📱 Abrir Rota Direto no GPS do Motoboy", link)
+            if st.button("⚙️ Gerar Rota Provisória"):
+                with st.spinner("A consultar o Google Maps para sugerir o caminho mais rápido..."):
+                    try:
+                        waypoints = [s['endereco'] for s in selecionados]
+                        # O Google sugere a rota otimizada inicial
+                        res = gmaps.directions(partida, destino_final_renove, waypoints=waypoints, optimize_waypoints=True)
+                        
+                        ordem_otimizada = res[0]['waypoint_order']
+                        rota_ordenada = [selecionados[i] for i in ordem_otimizada]
+                        
+                        st.session_state.rota_provisoria = rota_ordenada
+                        st.session_state.partida = partida
+                        st.session_state.etapa_rota = 1
+                        st.rerun()
+                    except Exception as e:
+                        st.error("Falha ao traçar rota. Confirme se as ruas cadastradas existem no mapa e tente novamente.")
 
-                    st.subheader("📋 Relatório da Rota Inteligente")
-                    st.info(f"🏍️ **INÍCIO (Partida):** {partida}")
+        # ETAPA 1: EDIÇÃO E REORDENAÇÃO DA ROTA PROVISÓRIA
+        elif st.session_state.etapa_rota == 1:
+            st.subheader("📋 Rota Provisória (Ajuste a Sequência se Necessário)")
+            st.info("Esta é a sequência mais curta sugerida pelo GPS. **Se precisar furar a fila por conta de uma urgência, altere os números na coluna 'ORDEM'.**")
+            
+            # Monta a tabela interativa
+            df_prov = pd.DataFrame([{
+                "ORDEM": i+1,
+                "URGÊNCIA": "🚨 SIM" if item["urgente"] else "",
+                "LOCAL": item["nome"],
+                "TAREFA": item["missao"],
+                "ENDEREÇO": item["endereco"],
+                "OBS": item["obs"]
+            } for i, item in enumerate(st.session_state.rota_provisoria)])
+            
+            df_editado = st.data_editor(
+                df_prov,
+                hide_index=True,
+                use_container_width=True,
+                disabled=["URGÊNCIA", "LOCAL", "TAREFA", "ENDEREÇO", "OBS"] # Bloqueia as outras colunas para evitar erros
+            )
+            
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("✅ Confirmar Sequência e Finalizar Rota", type="primary"):
+                    with st.spinner("A consolidar a rota final e a calcular a distância exata..."):
+                        # Reordena a rota de acordo com os números que o utilizador digitou
+                        df_final = df_editado.sort_values(by="ORDEM")
+                        rota_final = []
+                        for index, row in df_final.iterrows():
+                            rota_final.append({
+                                "nome": row["LOCAL"],
+                                "endereco": row["ENDEREÇO"],
+                                "missao": row["TAREFA"],
+                                "obs": row["OBS"],
+                                "urgente": True if "🚨" in row["URGÊNCIA"] else False
+                            })
+                            
+                        st.session_state.rota_final = rota_final
+                        st.session_state.etapa_rota = 2
+                        st.rerun()
+            with c2:
+                if st.button("⬅️ Cancelar e Voltar"):
+                    st.session_state.etapa_rota = 0
+                    st.rerun()
+
+        # ETAPA 2: ROTA FINALIZADA, LINK GPS E HISTÓRICO
+        elif st.session_state.etapa_rota == 2:
+            destino_final_renove = "Rua Rodrigues de Aquino, 267, Centro, João Pessoa, PB"
+            partida = st.session_state.partida
+            rota_final = st.session_state.rota_final
+            
+            try:
+                # Calculamos a distância exata da ordem que o utilizador escolheu manualmente
+                waypoints = [s['endereco'] for s in rota_final]
+                res = gmaps.directions(partida, destino_final_renove, waypoints=waypoints, optimize_waypoints=False)
+                
+                distancia_total_metros = 0
+                for leg in res[0]['legs']:
+                    distancia_total_metros += leg['distance']['value']
+                
+                distancia_total_km = round(distancia_total_metros / 1000, 1)
+                distancia_texto = f"{distancia_total_km} km"
+                
+                st.success(f"🎉 Trajeto Oficial Finalizado com sucesso! (Distância total: {distancia_texto})")
+                
+                url_partida = urllib.parse.quote(partida)
+                url_paradas = "/".join([urllib.parse.quote(s['endereco']) for s in rota_final])
+                url_destino = urllib.parse.quote(destino_final_renove)
+                
+                link = f"https://www.google.com/maps/dir/{url_partida}/{url_paradas}/{url_destino}"
+                
+                st.link_button("📱 Abrir Rota Direta no GPS do Motoboy", link)
+
+                st.subheader("📋 Relatório da Rota Oficial")
+                st.info(f"🏍️ **INÍCIO (Partida):** {partida}")
+                
+                nomes_rota_historico = []
+                
+                for i, item in enumerate(rota_final):
+                    # Adiciona visualmente a tag de urgência no relatório
+                    tag_urgente = "🚨 **URGENTE** | " if item["urgente"] else ""
+                    st.write(f"**{i+1}ª Parada - {item['nome']}** | {tag_urgente}🎯 {item['missao']}")
+                    st.write(f"📍 {item['endereco']}")
+                    if item['obs']:
+                        st.caption(f"📝 Obs: {item['obs']}")
+                    st.divider()
                     
-                    nomes_rota_historico = []
-                    
-                    for i, item in enumerate(rota_ordenada):
-                        st.write(f"**{i+1}ª Parada - {item['nome']}** | 🎯 {item['missao']}")
-                        st.write(f"📍 {item['endereco']}")
-                        if item['obs']:
-                            st.caption(f"📝 Obs: {item['obs']}")
-                        st.divider()
-                        nomes_rota_historico.append(item['nome'])
-                    
-                    st.success(f"🏁 **DESTINO FINAL:** Sede da Administradora ({destino_final_renove})")
-                    nomes_rota_historico.append("Sede Renove")
-                    
+                    # Para o histórico da planilha, coloca o emoji de sirene se for urgente
+                    nome_hist = f"🚨 {item['nome']}" if item["urgente"] else item['nome']
+                    nomes_rota_historico.append(nome_hist)
+                
+                st.success(f"🏁 **DESTINO FINAL:** Sede da Administradora ({destino_final_renove})")
+                nomes_rota_historico.append("Sede Renove")
+                
+                # Grava no histórico de planilhas apenas 1 vez
+                if not st.session_state.historico_salvo:
                     fuso_jp = pytz.timezone('America/Fortaleza')
                     agora = datetime.now(fuso_jp)
                     
@@ -274,11 +357,17 @@ elif aba == "🚚 Gerar Itinerário":
                     
                     try:
                         aba_historico.append_row(linha_historico)
+                        st.session_state.historico_salvo = True
                     except Exception as e:
                         st.warning("A rota foi gerada no ecrã, mas houve uma falha ao arquivar no histórico.")
-                        
-                except Exception as e:
-                    st.error("Falha ao traçar rota. Confirme se as ruas cadastradas existem no mapa e tente novamente.")
+                
+                if st.button("🔄 Planejar Nova Rota"):
+                    st.session_state.etapa_rota = 0
+                    st.session_state.historico_salvo = False
+                    st.rerun()
+                    
+            except Exception as e:
+                st.error(f"Falha ao processar rota final: {e}")
 
 # --- ABA DE RELATÓRIOS E GESTÃO DE HISTÓRICO ---
 elif aba == "📊 Relatórios de Rotas":
@@ -320,23 +409,20 @@ elif aba == "📊 Relatórios de Rotas":
             # --- ÁREA 2: DETALHAMENTO E BUSCA INTELIGENTE ---
             st.subheader("⚙️ Detalhar, Editar ou Excluir Rotas")
             
-            # Nova barra de pesquisa para Data ou Local
             termo_busca = st.text_input("🔍 Buscar Rota (Digite a Data ou o Nome do Local):", "").strip().lower()
             
             opcoes_rotas = []
             for idx, row in enumerate(dados_historico):
                 linha_sheets = idx + 2
                 
-                # Junta a data e o texto da rota para fazer a pesquisa
                 data_rota = str(row.get('DATA', '')).lower()
                 locais_rota = str(row.get('ROTA', '')).lower()
                 
-                # Só adiciona a rota à lista de seleção se o que você digitou estiver na data ou na rota
                 if termo_busca in data_rota or termo_busca in locais_rota:
                     texto_resumo = f"{row.get('DATA', '')} às {row.get('HORA', '')} | {row.get('KM TOTAL', '')} | {str(row.get('ROTA', ''))[:60]}..."
                     opcoes_rotas.append((linha_sheets, texto_resumo, row))
                 
-            opcoes_rotas.reverse() # Mostra as mais recentes primeiro no menu
+            opcoes_rotas.reverse()
             
             if not opcoes_rotas:
                 st.warning("Nenhuma rota encontrada com esse termo de busca.")
