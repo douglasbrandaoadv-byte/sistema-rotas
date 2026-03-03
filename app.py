@@ -228,7 +228,6 @@ elif aba == "🚚 Gerar Itinerário":
                     ordem_otimizada = res[0]['waypoint_order']
                     rota_ordenada = [selecionados[i] for i in ordem_otimizada]
                     
-                    # --- CÁLCULO DA QUILOMETRAGEM TOTAL ---
                     distancia_total_metros = 0
                     for leg in res[0]['legs']:
                         distancia_total_metros += leg['distance']['value']
@@ -266,11 +265,11 @@ elif aba == "🚚 Gerar Itinerário":
                     agora = datetime.now(fuso_jp)
                     
                     linha_historico = [
-                        agora.strftime("%d/%m/%Y"),           # DATA
-                        agora.strftime("%H:%M"),              # HORA
-                        partida,                              # PARTIDA
-                        " ➔ ".join(nomes_rota_historico),     # ROTA COMPLETA
-                        distancia_texto                       # KM TOTAL
+                        agora.strftime("%d/%m/%Y"),
+                        agora.strftime("%H:%M"),
+                        partida,
+                        " ➔ ".join(nomes_rota_historico),
+                        distancia_texto
                     ]
                     
                     try:
@@ -281,8 +280,9 @@ elif aba == "🚚 Gerar Itinerário":
                 except Exception as e:
                     st.error("Falha ao traçar rota. Confirme se as ruas cadastradas existem no mapa e tente novamente.")
 
+# --- ABA DE RELATÓRIOS E GESTÃO DE HISTÓRICO ---
 elif aba == "📊 Relatórios de Rotas":
-    st.header("Histórico de Rotas Geradas")
+    st.header("Histórico e Gestão de Rotas")
     
     try:
         dados_historico = aba_historico.get_all_records()
@@ -292,27 +292,94 @@ elif aba == "📊 Relatórios de Rotas":
         else:
             df_hist = pd.DataFrame(dados_historico)
             
-            # Filtro por Data
+            # --- ÁREA 1: VISUALIZAÇÃO GERAL E DOWNLOAD ---
             if 'DATA' in df_hist.columns:
                 datas_disponiveis = df_hist['DATA'].unique().tolist()
                 datas_disponiveis.reverse() 
                 
-                data_selecionada = st.selectbox("📅 Selecione a Data para visualizar:", ["Todas as Datas"] + datas_disponiveis)
+                c1, c2 = st.columns([3, 1])
+                with c1:
+                    data_selecionada = st.selectbox("📅 Filtrar tabela por Data:", ["Todas as Datas"] + datas_disponiveis)
                 
+                df_exibicao = df_hist.copy()
                 if data_selecionada != "Todas as Datas":
-                    df_hist = df_hist[df_hist['DATA'] == data_selecionada]
+                    df_exibicao = df_exibicao[df_exibicao['DATA'] == data_selecionada]
             
-            # Exibe os dados (agora com a coluna KM TOTAL)
-            st.dataframe(df_hist, use_container_width=True, hide_index=True)
-            
-            if 'DATA' in df_hist.columns:
-                csv = df_hist.to_csv(index=False).encode('utf-8')
+                st.dataframe(df_exibicao, use_container_width=True, hide_index=True)
+                
+                csv = df_exibicao.to_csv(index=False).encode('utf-8')
                 st.download_button(
-                    label="📥 Descarregar Relatório em Excel (CSV)",
+                    label="📥 Descarregar Tabela em CSV",
                     data=csv,
                     file_name=f"relatorio_rotas_{data_selecionada.replace('/', '-')}.csv" if data_selecionada != "Todas as Datas" else "relatorio_rotas_todas.csv",
                     mime="text/csv",
                 )
             
+            st.divider()
+            
+            # --- ÁREA 2: DETALHAMENTO, EDIÇÃO E EXCLUSÃO ---
+            st.subheader("⚙️ Detalhar, Editar ou Excluir Rotas")
+            
+            # Prepara a lista de opções (mapeando a linha exata no Google Sheets)
+            # A linha 1 é o cabeçalho. O índice 0 da lista dados_historico é a linha 2 no Sheets.
+            opcoes_rotas = []
+            for idx, row in enumerate(dados_historico):
+                linha_sheets = idx + 2
+                texto_resumo = f"{row.get('DATA', '')} às {row.get('HORA', '')} | {row.get('KM TOTAL', '')} | {str(row.get('ROTA', ''))[:45]}..."
+                opcoes_rotas.append((linha_sheets, texto_resumo, row))
+                
+            opcoes_rotas.reverse() # Mostra as mais recentes primeiro no menu
+            
+            rota_selecionada = st.selectbox("Selecione a rota que deseja gerenciar:", opcoes_rotas, format_func=lambda x: x[1])
+            
+            if rota_selecionada:
+                linha_alvo, resumo, dados = rota_selecionada
+                
+                # Exibição elegante do detalhamento da rota
+                st.write("### 🔎 Detalhes da Rota")
+                c_detalhe1, c_detalhe2 = st.columns(2)
+                with c_detalhe1:
+                    st.info(f"📅 **Data:** {dados.get('DATA', '')}\n\n"
+                            f"⏰ **Hora:** {dados.get('HORA', '')}\n\n"
+                            f"📍 **Partida:** {dados.get('PARTIDA', '')}\n\n"
+                            f"📏 **Distância:** {dados.get('KM TOTAL', '')}")
+                
+                with c_detalhe2:
+                    st.success("**Ordem dos Destinos:**")
+                    destinos = str(dados.get('ROTA', '')).split(" ➔ ")
+                    for i, destino in enumerate(destinos):
+                        st.write(f"{i+1}º ➔ {destino}")
+                
+                # Formulário de Edição e Botão de Exclusão
+                st.write("### 🛠️ Ações")
+                col_edit, col_del = st.columns(2)
+                
+                with col_edit:
+                    with st.expander("✏️ Editar Informações desta Rota"):
+                        with st.form("form_edita_rota"):
+                            n_data = st.text_input("Data", value=dados.get('DATA', ''))
+                            n_hora = st.text_input("Hora", value=dados.get('HORA', ''))
+                            n_partida = st.text_input("Partida", value=dados.get('PARTIDA', ''))
+                            n_rota = st.text_area("Rota (Mantenha a seta ' ➔ ' entre os locais)", value=dados.get('ROTA', ''))
+                            n_km = st.text_input("KM Total", value=dados.get('KM TOTAL', ''))
+                            
+                            if st.form_submit_button("Guardar Alterações"):
+                                try:
+                                    # Atualiza a linha exata no Google Sheets (Colunas A até E)
+                                    aba_historico.update(f"A{linha_alvo}:E{linha_alvo}", [[n_data, n_hora, n_partida, n_rota, n_km]])
+                                    st.success("Rota atualizada com sucesso no banco de dados!")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Erro ao atualizar: {e}")
+                
+                with col_del:
+                    if st.button("🗑️ Excluir esta Rota Definitivamente", type="primary"):
+                        try:
+                            aba_historico.delete_rows(linha_alvo)
+                            st.warning("A rota foi apagada do histórico.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Erro ao excluir: {e}")
+            
     except Exception as e:
-        st.error("⚠️ Ocorreu um erro ao ler o histórico. Certifique-se de que criou a aba 'historico_rotas' na sua folha de cálculo com os títulos exatos: DATA | HORA | PARTIDA | ROTA | KM TOTAL.")
+        st.error(f"⚠️ Ocorreu um erro ao ler o histórico. Verifique se a aba 'historico_rotas' possui as colunas exatas: DATA | HORA | PARTIDA | ROTA | KM TOTAL. Detalhe: {e}")
