@@ -317,69 +317,77 @@ elif aba == "📊 Relatórios de Rotas":
             
             st.divider()
             
-            # --- ÁREA 2: DETALHAMENTO, EDIÇÃO E EXCLUSÃO ---
+            # --- ÁREA 2: DETALHAMENTO E BUSCA INTELIGENTE ---
             st.subheader("⚙️ Detalhar, Editar ou Excluir Rotas")
             
-            # Prepara a lista de opções (mapeando a linha exata no Google Sheets)
-            # A linha 1 é o cabeçalho. O índice 0 da lista dados_historico é a linha 2 no Sheets.
+            # Nova barra de pesquisa para Data ou Local
+            termo_busca = st.text_input("🔍 Buscar Rota (Digite a Data ou o Nome do Local):", "").strip().lower()
+            
             opcoes_rotas = []
             for idx, row in enumerate(dados_historico):
                 linha_sheets = idx + 2
-                texto_resumo = f"{row.get('DATA', '')} às {row.get('HORA', '')} | {row.get('KM TOTAL', '')} | {str(row.get('ROTA', ''))[:45]}..."
-                opcoes_rotas.append((linha_sheets, texto_resumo, row))
+                
+                # Junta a data e o texto da rota para fazer a pesquisa
+                data_rota = str(row.get('DATA', '')).lower()
+                locais_rota = str(row.get('ROTA', '')).lower()
+                
+                # Só adiciona a rota à lista de seleção se o que você digitou estiver na data ou na rota
+                if termo_busca in data_rota or termo_busca in locais_rota:
+                    texto_resumo = f"{row.get('DATA', '')} às {row.get('HORA', '')} | {row.get('KM TOTAL', '')} | {str(row.get('ROTA', ''))[:60]}..."
+                    opcoes_rotas.append((linha_sheets, texto_resumo, row))
                 
             opcoes_rotas.reverse() # Mostra as mais recentes primeiro no menu
             
-            rota_selecionada = st.selectbox("Selecione a rota que deseja gerenciar:", opcoes_rotas, format_func=lambda x: x[1])
-            
-            if rota_selecionada:
-                linha_alvo, resumo, dados = rota_selecionada
+            if not opcoes_rotas:
+                st.warning("Nenhuma rota encontrada com esse termo de busca.")
+            else:
+                rota_selecionada = st.selectbox("Selecione a rota que deseja gerenciar:", opcoes_rotas, format_func=lambda x: x[1])
                 
-                # Exibição elegante do detalhamento da rota
-                st.write("### 🔎 Detalhes da Rota")
-                c_detalhe1, c_detalhe2 = st.columns(2)
-                with c_detalhe1:
-                    st.info(f"📅 **Data:** {dados.get('DATA', '')}\n\n"
-                            f"⏰ **Hora:** {dados.get('HORA', '')}\n\n"
-                            f"📍 **Partida:** {dados.get('PARTIDA', '')}\n\n"
-                            f"📏 **Distância:** {dados.get('KM TOTAL', '')}")
-                
-                with c_detalhe2:
-                    st.success("**Ordem dos Destinos:**")
-                    destinos = str(dados.get('ROTA', '')).split(" ➔ ")
-                    for i, destino in enumerate(destinos):
-                        st.write(f"{i+1}º ➔ {destino}")
-                
-                # Formulário de Edição e Botão de Exclusão
-                st.write("### 🛠️ Ações")
-                col_edit, col_del = st.columns(2)
-                
-                with col_edit:
-                    with st.expander("✏️ Editar Informações desta Rota"):
-                        with st.form("form_edita_rota"):
-                            n_data = st.text_input("Data", value=dados.get('DATA', ''))
-                            n_hora = st.text_input("Hora", value=dados.get('HORA', ''))
-                            n_partida = st.text_input("Partida", value=dados.get('PARTIDA', ''))
-                            n_rota = st.text_area("Rota (Mantenha a seta ' ➔ ' entre os locais)", value=dados.get('ROTA', ''))
-                            n_km = st.text_input("KM Total", value=dados.get('KM TOTAL', ''))
-                            
-                            if st.form_submit_button("Guardar Alterações"):
-                                try:
-                                    # Atualiza a linha exata no Google Sheets (Colunas A até E)
-                                    aba_historico.update(f"A{linha_alvo}:E{linha_alvo}", [[n_data, n_hora, n_partida, n_rota, n_km]])
-                                    st.success("Rota atualizada com sucesso no banco de dados!")
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"Erro ao atualizar: {e}")
-                
-                with col_del:
-                    if st.button("🗑️ Excluir esta Rota Definitivamente", type="primary"):
-                        try:
-                            aba_historico.delete_rows(linha_alvo)
-                            st.warning("A rota foi apagada do histórico.")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Erro ao excluir: {e}")
+                if rota_selecionada:
+                    linha_alvo, resumo, dados = rota_selecionada
+                    
+                    st.write("### 🔎 Detalhes da Rota")
+                    c_detalhe1, c_detalhe2 = st.columns(2)
+                    with c_detalhe1:
+                        st.info(f"📅 **Data:** {dados.get('DATA', '')}\n\n"
+                                f"⏰ **Hora:** {dados.get('HORA', '')}\n\n"
+                                f"📍 **Partida:** {dados.get('PARTIDA', '')}\n\n"
+                                f"📏 **Distância:** {dados.get('KM TOTAL', '')}")
+                    
+                    with c_detalhe2:
+                        st.success("**Ordem dos Destinos:**")
+                        destinos = str(dados.get('ROTA', '')).split(" ➔ ")
+                        for i, destino in enumerate(destinos):
+                            st.write(f"{i+1}º ➔ {destino}")
+                    
+                    st.write("### 🛠️ Ações")
+                    col_edit, col_del = st.columns(2)
+                    
+                    with col_edit:
+                        with st.expander("✏️ Editar Informações desta Rota"):
+                            with st.form("form_edita_rota"):
+                                n_data = st.text_input("Data", value=dados.get('DATA', ''))
+                                n_hora = st.text_input("Hora", value=dados.get('HORA', ''))
+                                n_partida = st.text_input("Partida", value=dados.get('PARTIDA', ''))
+                                n_rota = st.text_area("Rota (Mantenha a seta ' ➔ ' entre os locais)", value=dados.get('ROTA', ''))
+                                n_km = st.text_input("KM Total", value=dados.get('KM TOTAL', ''))
+                                
+                                if st.form_submit_button("Guardar Alterações"):
+                                    try:
+                                        aba_historico.update(f"A{linha_alvo}:E{linha_alvo}", [[n_data, n_hora, n_partida, n_rota, n_km]])
+                                        st.success("Rota atualizada com sucesso no banco de dados!")
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"Erro ao atualizar: {e}")
+                    
+                    with col_del:
+                        if st.button("🗑️ Excluir esta Rota Definitivamente", type="primary"):
+                            try:
+                                aba_historico.delete_rows(linha_alvo)
+                                st.warning("A rota foi apagada do histórico.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Erro ao excluir: {e}")
             
     except Exception as e:
         st.error(f"⚠️ Ocorreu um erro ao ler o histórico. Verifique se a aba 'historico_rotas' possui as colunas exatas: DATA | HORA | PARTIDA | ROTA | KM TOTAL. Detalhe: {e}")
