@@ -29,6 +29,8 @@ except Exception as e:
     st.error(f"⚠️ Erro ao aceder ao sistema do Google: {e}")
     st.stop()
 
+# --- SISTEMA DE CACHE PARA PROTEGER CONTRA BLOQUEIOS DO GOOGLE ---
+@st.cache_data(ttl=600, show_spinner=False)
 def buscar_dados():
     try:
         registos = aba_banco.get_all_records()
@@ -45,6 +47,14 @@ def buscar_dados():
 def salvar_dados(df):
     aba_banco.clear()
     set_with_dataframe(aba_banco, df)
+    buscar_dados.clear() # Limpa a memória para forçar uma nova leitura atualizada
+
+@st.cache_data(ttl=600, show_spinner=False)
+def buscar_historico():
+    try:
+        return aba_historico.get_all_records()
+    except Exception as e:
+        return []
 
 # --- SISTEMA DE ACESSO COM MEMÓRIA ANTI-REFRESH ---
 if st.query_params.get("acesso") == "permitido":
@@ -80,33 +90,28 @@ if aba == "📍 Gestão de Locais":
     st.header("Base de Dados de Condomínios")
     df_existente = buscar_dados()
     
-    # Aba Editar/Eliminar foi removida. O sistema agora tem apenas 3 abas.
     tab_cadastrados, tab_novo, tab_lote = st.tabs([
         "🏢 Empreendimentos Cadastrados", 
         "➕ Adicionar Local", 
         "📂 Cadastro em Lote"
     ])
 
-    # --- NOVA ABA 1: VISUALIZAÇÃO, BUSCA, EDIÇÃO E EXCLUSÃO ---
     with tab_cadastrados:
         st.subheader("Pesquisa e Gestão de Locais")
         
         if df_existente.empty:
             st.info("A base de dados encontra-se vazia.")
         else:
-            # 1. Barra de Busca Inteligente
             termo_busca = st.text_input("🔍 Buscar Empreendimento (Digite o nome, rua ou bairro):", "").strip().lower()
             
             df_display = df_existente.copy()
             
-            # Filtra a tabela se o utilizador digitar algo
             if termo_busca:
                 mask = df_display.apply(lambda row: row.astype(str).str.lower().str.contains(termo_busca).any(), axis=1)
                 df_display = df_display[mask]
                 if df_display.empty:
                     st.warning("Nenhum local encontrado com este termo.")
             
-            # 2. Tabela com Caixas de Seleção
             st.caption("💡 Marque a caixa ao lado do local para **Editar** ou **Excluir**.")
             df_display.insert(0, "SELECIONAR", False)
             
@@ -119,16 +124,13 @@ if aba == "📍 Gestão de Locais":
                 key="editor_locais_cadastrados"
             )
             
-            # Filtra os registos que foram marcados na caixa de seleção
             selecionados = df_editado[df_editado["SELECIONAR"] == True]
             
-            # 3. Lógica de Edição e Exclusão
             if not selecionados.empty:
                 st.divider()
                 
-                # Se selecionou exatamente 1, permite a edição
                 if len(selecionados) == 1:
-                    idx_real = selecionados.index[0] # Pega a linha exata no banco de dados
+                    idx_real = selecionados.index[0] 
                     dados_originais = df_existente.loc[idx_real]
                     
                     st.write("### ✏️ Editar Informações do Local")
@@ -152,7 +154,6 @@ if aba == "📍 Gestão de Locais":
                 else:
                     st.info("⚠️ Para **Editar**, por favor selecione apenas um (1) local de cada vez.")
                 
-                # Botão de exclusão (permite apagar vários de uma vez se estiverem selecionados)
                 st.write("### 🗑️ Exclusão")
                 if st.button(f"Excluir {len(selecionados)} local(is) selecionado(s)", type="primary"):
                     indices_para_excluir = selecionados.index.tolist()
@@ -413,6 +414,7 @@ elif aba == "🚚 Gerar Itinerário":
                     
                     try:
                         aba_historico.append_row(linha_historico)
+                        buscar_historico.clear() # Atualiza o cache do histórico
                         st.session_state.historico_salvo = True
                     except Exception as e:
                         st.warning("A rota foi gerada no ecrã, mas houve uma falha ao arquivar no histórico.")
@@ -432,7 +434,7 @@ elif aba == "📊 Relatórios de Rotas":
     st.header("Histórico e Gestão de Rotas")
     
     try:
-        dados_historico = aba_historico.get_all_records()
+        dados_historico = buscar_historico()
         
         if not dados_historico:
             st.info("Nenhuma rota foi gerada e gravada ainda.")
@@ -575,6 +577,7 @@ elif aba == "📊 Relatórios de Rotas":
                                     if st.form_submit_button("Guardar Alterações"):
                                         try:
                                             aba_historico.update(f"A{linha_alvo}:E{linha_alvo}", [[n_data, n_hora, n_partida, n_rota, n_km]])
+                                            buscar_historico.clear() # Limpa o cache após editar
                                             st.success("Rota atualizada com sucesso no banco de dados!")
                                             st.rerun()
                                         except Exception as e:
@@ -584,6 +587,7 @@ elif aba == "📊 Relatórios de Rotas":
                             if st.button("🗑️ Excluir esta Rota Definitivamente", type="primary"):
                                 try:
                                     aba_historico.delete_rows(linha_alvo)
+                                    buscar_historico.clear() # Limpa o cache após apagar
                                     st.warning("A rota foi apagada do histórico.")
                                     st.rerun()
                                 except Exception as e:
