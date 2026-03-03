@@ -52,7 +52,6 @@ if st.query_params.get("acesso") == "permitido":
 elif 'logado' not in st.session_state:
     st.session_state.logado = False
 
-# Variável para controlar a limpeza da planilha de lote
 if 'lote_key' not in st.session_state:
     st.session_state.lote_key = 0
 
@@ -81,20 +80,89 @@ if aba == "📍 Gestão de Locais":
     st.header("Base de Dados de Condomínios")
     df_existente = buscar_dados()
     
-    tab_cadastrados, tab_novo, tab_lote, tab_gerenciar = st.tabs([
+    # Aba Editar/Eliminar foi removida. O sistema agora tem apenas 3 abas.
+    tab_cadastrados, tab_novo, tab_lote = st.tabs([
         "🏢 Empreendimentos Cadastrados", 
         "➕ Adicionar Local", 
-        "📂 Cadastro em Lote", 
-        "⚙️ Editar/Eliminar"
+        "📂 Cadastro em Lote"
     ])
 
+    # --- NOVA ABA 1: VISUALIZAÇÃO, BUSCA, EDIÇÃO E EXCLUSÃO ---
     with tab_cadastrados:
-        st.subheader("Lista de Empreendimentos")
+        st.subheader("Pesquisa e Gestão de Locais")
+        
         if df_existente.empty:
             st.info("A base de dados encontra-se vazia.")
         else:
-            st.dataframe(df_existente, use_container_width=True, hide_index=True)
-            st.caption(f"📊 Total de locais cadastrados: {len(df_existente)}")
+            # 1. Barra de Busca Inteligente
+            termo_busca = st.text_input("🔍 Buscar Empreendimento (Digite o nome, rua ou bairro):", "").strip().lower()
+            
+            df_display = df_existente.copy()
+            
+            # Filtra a tabela se o utilizador digitar algo
+            if termo_busca:
+                mask = df_display.apply(lambda row: row.astype(str).str.lower().str.contains(termo_busca).any(), axis=1)
+                df_display = df_display[mask]
+                if df_display.empty:
+                    st.warning("Nenhum local encontrado com este termo.")
+            
+            # 2. Tabela com Caixas de Seleção
+            st.caption("💡 Marque a caixa ao lado do local para **Editar** ou **Excluir**.")
+            df_display.insert(0, "SELECIONAR", False)
+            
+            df_editado = st.data_editor(
+                df_display,
+                column_config={"SELECIONAR": st.column_config.CheckboxColumn(required=True)},
+                disabled=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"],
+                hide_index=True,
+                use_container_width=True,
+                key="editor_locais_cadastrados"
+            )
+            
+            # Filtra os registos que foram marcados na caixa de seleção
+            selecionados = df_editado[df_editado["SELECIONAR"] == True]
+            
+            # 3. Lógica de Edição e Exclusão
+            if not selecionados.empty:
+                st.divider()
+                
+                # Se selecionou exatamente 1, permite a edição
+                if len(selecionados) == 1:
+                    idx_real = selecionados.index[0] # Pega a linha exata no banco de dados
+                    dados_originais = df_existente.loc[idx_real]
+                    
+                    st.write("### ✏️ Editar Informações do Local")
+                    with st.form("form_edita_local"):
+                        c1, c2 = st.columns(2)
+                        n_nome = c1.text_input("NOME", value=dados_originais['NOME'])
+                        n_rua = c2.text_input("RUA", value=dados_originais['RUA'])
+                        n_num = c1.text_input("NÚMERO", value=str(dados_originais['NUMERO']))
+                        n_bair = c2.text_input("BAIRRO", value=dados_originais['BAIRRO'])
+                        n_cid = c1.text_input("CIDADE", value=dados_originais['CIDADE'])
+                        n_est = c2.text_input("ESTADO", value=dados_originais['ESTADO'])
+                        
+                        col_salvar, col_vazia = st.columns([1, 3])
+                        with col_salvar:
+                            if st.form_submit_button("✅ Guardar Edição"):
+                                df_existente.loc[idx_real] = [n_nome, n_rua, n_num, n_bair, n_cid, n_est]
+                                with st.spinner("A atualizar no Google Sheets..."):
+                                    salvar_dados(df_existente)
+                                st.success("Local atualizado com sucesso!")
+                                st.rerun()
+                else:
+                    st.info("⚠️ Para **Editar**, por favor selecione apenas um (1) local de cada vez.")
+                
+                # Botão de exclusão (permite apagar vários de uma vez se estiverem selecionados)
+                st.write("### 🗑️ Exclusão")
+                if st.button(f"Excluir {len(selecionados)} local(is) selecionado(s)", type="primary"):
+                    indices_para_excluir = selecionados.index.tolist()
+                    df_existente = df_existente.drop(indices_para_excluir)
+                    with st.spinner("A remover do banco de dados..."):
+                        salvar_dados(df_existente)
+                    st.warning("Local(is) excluído(s) com sucesso.")
+                    st.rerun()
+            else:
+                st.caption(f"📊 Total listado: {len(df_display)} empreendimento(s).")
 
     with tab_novo:
         with st.form("form_novo"):
@@ -130,7 +198,6 @@ if aba == "📍 Gestão de Locais":
                 columns=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"]
             )
             
-            # Adicionada a chave dinâmica que permite recriar a tabela limpa
             df_editado = st.data_editor(
                 df_template, 
                 num_rows="dynamic", 
@@ -148,7 +215,6 @@ if aba == "📍 Gestão de Locais":
                         salvar_dados(df_final)
                     
                     st.success(f"✅ Sucesso! {len(df_valido)} locais cadastrados de uma só vez.")
-                    # Altera a chave para limpar a tabela na próxima renderização
                     st.session_state.lote_key += 1
                     st.rerun()
                 else:
@@ -185,40 +251,6 @@ if aba == "📍 Gestão de Locais":
                         st.error("⚠️ ERRO: A sua planilha não contém as colunas corretas.")
                 except Exception as e:
                     st.error(f"Erro ao ler o ficheiro: {e}")
-
-    with tab_gerenciar:
-        if df_existente.empty:
-            st.info("A base de dados encontra-se vazia.")
-        else:
-            lista_nomes = df_existente['NOME'].tolist()
-            selecionado = st.selectbox("Selecione o local para editar:", lista_nomes)
-            
-            dados = df_existente[df_existente['NOME'] == selecionado].iloc[0]
-            idx = df_existente[df_existente['NOME'] == selecionado].index[0]
-
-            with st.form("form_edicao"):
-                c1, c2 = st.columns(2)
-                n_nome = c1.text_input("NOME", value=dados['NOME'])
-                n_rua = c2.text_input("RUA", value=dados['RUA'])
-                n_num = c1.text_input("NÚMERO", value=str(dados['NUMERO']))
-                n_bair = c2.text_input("BAIRRO", value=dados['BAIRRO'])
-                n_cid = c1.text_input("CIDADE", value=dados['CIDADE'])
-                n_est = c2.text_input("ESTADO", value=dados['ESTADO'])
-                
-                b1, b2 = st.columns(2)
-                if b1.form_submit_button("✅ Guardar Alterações"):
-                    df_existente.loc[idx] = [n_nome, n_rua, n_num, n_bair, n_cid, n_est]
-                    with st.spinner("A atualizar no sistema..."):
-                        salvar_dados(df_existente)
-                    st.success("Informações atualizadas!")
-                    st.rerun()
-
-                if b2.form_submit_button("🗑️ Remover Registo"):
-                    df_existente = df_existente.drop(idx)
-                    with st.spinner("A remover do sistema..."):
-                        salvar_dados(df_existente)
-                    st.warning("Condomínio removido da lista.")
-                    st.rerun()
 
 # ==========================================================
 # MENU 2: GERAR ITINERÁRIO
