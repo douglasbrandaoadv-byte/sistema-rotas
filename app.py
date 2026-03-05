@@ -7,6 +7,7 @@ import urllib.parse
 import json
 from datetime import datetime
 import pytz
+import streamlit.components.v1 as components  # Biblioteca necessária para criar o botão de impressão
 
 st.set_page_config(page_title="Rota Inteligente - Renove", layout="wide")
 
@@ -24,7 +25,7 @@ try:
     
     aba_banco = planilha.worksheet("locais")
     aba_historico = planilha.worksheet("historico_rotas")
-    aba_veiculo = planilha.worksheet("historico_veiculo") # Conexão com a nova aba
+    aba_veiculo = planilha.worksheet("historico_veiculo")
     
 except Exception as e:
     st.error(f"⚠️ Erro ao aceder ao sistema do Google. Verifique se criou a aba 'historico_veiculo'. Detalhe: {e}")
@@ -88,7 +89,6 @@ if st.sidebar.button("Terminar Sessão"):
     st.query_params.clear()
     st.rerun()
 
-# Menus atualizados com as novas funcionalidades
 aba = st.sidebar.radio("Navegação", [
     "📍 Gestão de Locais", 
     "🚚 Gerar Itinerário", 
@@ -428,7 +428,7 @@ elif aba == "🚚 Gerar Itinerário":
                     
                     try:
                         aba_historico.append_row(linha_historico)
-                        buscar_historico.clear() # Atualiza o cache do histórico
+                        buscar_historico.clear()
                         st.session_state.historico_salvo = True
                     except Exception as e:
                         st.warning("A rota foi gerada no ecrã, mas houve uma falha ao arquivar no histórico.")
@@ -461,13 +461,14 @@ elif aba == "📊 Relatórios de Rotas":
                 "⚙️ Detalhar e Editar"
             ])
             
+            # --- ABA 1: HISTÓRICO GERAL (COM BOTÃO IMPRIMIR) ---
             with tab_geral:
                 if 'DATA' in df_hist.columns:
                     datas_disponiveis = df_hist['DATA'].unique().tolist()
                     datas_disponiveis.reverse() 
                     
-                    c1, c2 = st.columns([3, 1])
-                    with c1:
+                    col_filtro, col_vazia = st.columns([3, 1])
+                    with col_filtro:
                         data_selecionada = st.selectbox("📅 Filtrar tabela por Data:", ["Todas as Datas"] + datas_disponiveis)
                     
                     df_exibicao = df_hist.copy()
@@ -476,14 +477,43 @@ elif aba == "📊 Relatórios de Rotas":
                 
                     st.dataframe(df_exibicao, use_container_width=True, hide_index=True)
                     
-                    csv = df_exibicao.to_csv(index=False).encode('utf-8')
-                    st.download_button(
-                        label="📥 Descarregar Tabela em CSV",
-                        data=csv,
-                        file_name=f"relatorio_rotas_{data_selecionada.replace('/', '-')}.csv" if data_selecionada != "Todas as Datas" else "relatorio_rotas_todas.csv",
-                        mime="text/csv",
-                    )
+                    st.write("") # Espaçamento
+                    
+                    # Criação dos botões de Descarregar e Imprimir
+                    col_btn1, col_btn2, col_vazia = st.columns([1, 1, 2])
+                    with col_btn1:
+                        csv = df_exibicao.to_csv(index=False).encode('utf-8')
+                        st.download_button(
+                            label="📥 Descarregar em CSV",
+                            data=csv,
+                            file_name=f"relatorio_rotas_{data_selecionada.replace('/', '-')}.csv" if data_selecionada != "Todas as Datas" else "relatorio_rotas_todas.csv",
+                            mime="text/csv",
+                            use_container_width=True
+                        )
+                    with col_btn2:
+                        # Injeção segura de HTML/JavaScript para acionar a impressora
+                        components.html(
+                            """
+                            <script>
+                            function imprimir() {
+                                try { window.parent.print(); } catch (e) { window.print(); }
+                            }
+                            </script>
+                            <style>
+                            body { margin: 0; padding: 0; overflow: hidden; }
+                            button {
+                                background-color: #ffffff; border: 1px solid rgba(49, 51, 63, 0.2); border-radius: 0.5rem; 
+                                color: #31333f; cursor: pointer; font-family: 'Source Sans Pro', sans-serif; font-size: 1rem; 
+                                padding: 0.45rem 0.75rem; width: 100%; line-height: 1.6; transition: 0.2s;
+                            }
+                            button:hover { border-color: #ff4b4b; color: #ff4b4b; }
+                            </style>
+                            <button onclick="imprimir()">🖨️ Imprimir Tabela</button>
+                            """,
+                            height=45
+                        )
             
+            # --- ABA 2: RELATÓRIO AGRUPADO (COM BOTÃO IMPRIMIR) ---
             with tab_agrupado:
                 st.info("💡 **Dica:** Marque as caixas na coluna 'SELECIONAR' para escolher rotas específicas. O sistema irá somar a quilometragem e mostrar os condomínios mais visitados nas rotas escolhidas.")
                 
@@ -532,7 +562,34 @@ elif aba == "📊 Relatórios de Rotas":
                         contagem.columns = ["Condomínio / Local", "Qtd. de Visitas"]
                         c_res2.write("**🏆 Locais mais frequentes:**")
                         c_res2.dataframe(contagem, hide_index=True, use_container_width=True)
+                    
+                    st.write("---")
+                    
+                    # Botão de impressão do relatório agrupado
+                    col_btn_imp, col_vazia_imp = st.columns([1, 3])
+                    with col_btn_imp:
+                        components.html(
+                            """
+                            <script>
+                            function imprimir() {
+                                try { window.parent.print(); } catch (e) { window.print(); }
+                            }
+                            </script>
+                            <style>
+                            body { margin: 0; padding: 0; overflow: hidden; }
+                            button {
+                                background-color: #ffffff; border: 1px solid rgba(49, 51, 63, 0.2); border-radius: 0.5rem; 
+                                color: #31333f; cursor: pointer; font-family: 'Source Sans Pro', sans-serif; font-size: 1rem; 
+                                padding: 0.45rem 0.75rem; width: 100%; line-height: 1.6; transition: 0.2s;
+                            }
+                            button:hover { border-color: #ff4b4b; color: #ff4b4b; }
+                            </style>
+                            <button onclick="imprimir()">🖨️ Imprimir Relatório</button>
+                            """,
+                            height=45
+                        )
 
+            # --- ABA 3: DETALHAR, EDITAR E EXCLUIR ---
             with tab_edicao:
                 st.subheader("⚙️ Detalhar, Editar ou Excluir Rotas")
                 
@@ -608,7 +665,7 @@ elif aba == "📊 Relatórios de Rotas":
         st.error(f"⚠️ Ocorreu um erro ao ler o histórico. Verifique se a aba 'historico_rotas' possui as colunas exatas: DATA | HORA | PARTIDA | ROTA | KM TOTAL. Detalhe: {e}")
 
 # ==========================================================
-# MENU 4: DADOS DO VEÍCULO (NOVO)
+# MENU 4: DADOS DO VEÍCULO 
 # ==========================================================
 elif aba == "🏍️ Dados do Veículo":
     st.header("Registo Diário da Frota")
@@ -626,7 +683,6 @@ elif aba == "🏍️ Dados do Veículo":
         st.subheader("Combustível")
         abasteceu = st.checkbox("Houve abastecimento neste dia?")
         
-        # O campo de valor sempre existe, mas o utilizador preenche se abasteceu
         valor_abast = st.number_input("Valor total do abastecimento (R$)", min_value=0.0, step=0.01, format="%.2f", help="Se não houve abastecimento, deixe em 0.00")
         
         if st.form_submit_button("💾 Guardar Registo Diário", type="primary"):
@@ -636,19 +692,18 @@ elif aba == "🏍️ Dados do Veículo":
             
             try:
                 aba_veiculo.append_row(linha_veiculo)
-                buscar_veiculo.clear() # Atualiza a cache
+                buscar_veiculo.clear()
                 st.success("✅ Informações do veículo registadas com sucesso no banco de dados!")
             except Exception as e:
                 st.error(f"Erro ao guardar os dados. Verifique a aba 'historico_veiculo'. Detalhe: {e}")
 
 # ==========================================================
-# MENU 5: RELATÓRIOS DE VEÍCULOS (NOVO)
+# MENU 5: RELATÓRIOS DE VEÍCULOS
 # ==========================================================
 elif aba == "📑 Relatório de Veículos":
     st.header("Relatório Financeiro e de Rodagem")
     st.write("Selecione um período para cruzar as rotas percorridas com os gastos de combustível.")
     
-    # Seleção de Data
     datas = st.date_input("Selecione o Período (Data Inicial e Final):", value=[], format="DD/MM/YYYY")
     
     if len(datas) == 2:
@@ -666,16 +721,12 @@ elif aba == "📑 Relatório de Veículos":
             total_km_rotas = 0.0
             total_gasto_combustivel = 0.0
             
-            # --- 1. Filtro e Cálculo das Rotas (KM) ---
             if not df_rotas.empty and 'DATA' in df_rotas.columns:
-                # Converte as datas da planilha para objetos 'Date' comparáveis
                 df_rotas['Data_Parsed'] = pd.to_datetime(df_rotas['DATA'], format='%d/%m/%Y', errors='coerce').dt.date
                 
-                # Filtra o período
                 mask_rotas = (df_rotas['Data_Parsed'] >= data_inicio) & (df_rotas['Data_Parsed'] <= data_fim)
                 df_rotas_filtrado = df_rotas[mask_rotas]
                 
-                # Soma a Quilometragem
                 for km_str in df_rotas_filtrado.get('KM TOTAL', []):
                     try:
                         km_limpo = str(km_str).lower().replace('km', '').replace(',', '.').strip()
@@ -683,40 +734,32 @@ elif aba == "📑 Relatório de Veículos":
                     except:
                         pass
 
-            # --- 2. Filtro e Cálculo do Veículo (Abastecimento) ---
             if not df_veic.empty and 'DATA' in df_veic.columns:
                 df_veic['Data_Parsed'] = pd.to_datetime(df_veic['DATA'], format='%d/%m/%Y', errors='coerce').dt.date
                 
                 mask_veic = (df_veic['Data_Parsed'] >= data_inicio) & (df_veic['Data_Parsed'] <= data_fim)
                 df_veic_filtrado = df_veic[mask_veic]
                 
-                # Soma os Valores
                 df_veic_filtrado['VALOR'] = pd.to_numeric(df_veic_filtrado.get('VALOR', 0), errors='coerce').fillna(0)
                 total_gasto_combustivel = df_veic_filtrado['VALOR'].sum()
             
-            # --- EXIBIÇÃO DO PAINEL DE RESULTADOS ---
             st.divider()
             st.subheader(f"📊 Resumo do Período: {data_inicio.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')}")
             
             c1, c2 = st.columns(2)
             
-            # Métrica de Distância (Baseada nas rotas do GPS)
             c1.metric(
                 label="🛣️ Total Percorrido em Rotas (GPS)", 
                 value=f"{total_km_rotas:.1f} km"
             )
             
-            # Métrica de Combustível
             c2.metric(
                 label="⛽ Gasto Total com Combustível", 
                 value=f"R$ {total_gasto_combustivel:.2f}"
             )
             
-            # Tabela de detalhamento dos abastecimentos no período
             if not df_veic.empty and not df_veic_filtrado.empty:
                 st.write("### 📝 Detalhamento Diário do Veículo")
-                
-                # Remove a coluna temporária de data que criámos apenas para o filtro e mostra a tabela
                 tabela_exibicao = df_veic_filtrado.drop(columns=['Data_Parsed'], errors='ignore')
                 st.dataframe(tabela_exibicao, hide_index=True, use_container_width=True)
     
