@@ -96,7 +96,7 @@ if st.sidebar.button("Terminar Sessão"):
 
 aba = st.sidebar.radio("Navegação", [
     "📍 Gestão de Locais", 
-    "🚚 Gerar Itinerário", 
+    "🚚 Gerar Intinerário", 
     "📊 Relatórios de Rotas",
     "🏍️ Dados do Veículo",
     "📑 Relatório de Veículos"
@@ -273,9 +273,9 @@ if aba == "📍 Gestão de Locais":
                     st.error(f"Erro ao ler o ficheiro: {e}")
 
 # ==========================================================
-# MENU 2: GERAR ITINERÁRIO
+# MENU 2: GERAR INTINERÁRIO
 # ==========================================================
-elif aba == "🚚 Gerar Itinerário":
+elif aba == "🚚 Gerar Intinerário":
     st.header("Cálculo de Rota e Gestão de Urgências")
     df_locais = buscar_dados()
     
@@ -438,10 +438,36 @@ elif aba == "🚚 Gerar Itinerário":
                     except Exception as e:
                         st.warning("A rota foi gerada no ecrã, mas houve uma falha ao arquivar no histórico.")
                 
-                if st.button("🔄 Planejar Nova Rota"):
-                    st.session_state.etapa_rota = 0
-                    st.session_state.historico_salvo = False
-                    st.rerun()
+                st.write("")
+                
+                # --- NOVOS BOTOES DE IMPRESSÃO E NOVA ROTA ---
+                col_btn_nova, col_btn_imp = st.columns(2)
+                with col_btn_nova:
+                    if st.button("🔄 Planejar Nova Rota", use_container_width=True):
+                        st.session_state.etapa_rota = 0
+                        st.session_state.historico_salvo = False
+                        st.rerun()
+                with col_btn_imp:
+                    components.html(
+                        """
+                        <script>
+                        function imprimir() {
+                            try { window.parent.print(); } catch (e) { window.print(); }
+                        }
+                        </script>
+                        <style>
+                        body { margin: 0; padding: 0; overflow: hidden; }
+                        button {
+                            background-color: #ffffff; border: 1px solid rgba(49, 51, 63, 0.2); border-radius: 0.5rem; 
+                            color: #31333f; cursor: pointer; font-family: 'Source Sans Pro', sans-serif; font-size: 1rem; 
+                            padding: 0.45rem 0.75rem; width: 100%; line-height: 1.6; transition: 0.2s;
+                        }
+                        button:hover { border-color: #ff4b4b; color: #ff4b4b; }
+                        </style>
+                        <button onclick="imprimir()">🖨️ Imprimir Relatório da Rota</button>
+                        """,
+                        height=45
+                    )
                     
             except Exception as e:
                 st.error(f"Falha ao processar rota final: {e}")
