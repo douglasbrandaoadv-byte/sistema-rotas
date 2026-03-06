@@ -7,31 +7,36 @@ import urllib.parse
 import json
 from datetime import datetime
 import pytz
-import streamlit.components.v1 as components  # Biblioteca necessária para criar o botão de impressão
+import streamlit.components.v1 as components
 
 st.set_page_config(page_title="Rota Inteligente - Renove", layout="wide")
 
-# --- CONEXÃO OFICIAL GOOGLE (NATIVA E SEM BUGS) ---
-try:
+# --- CONEXÃO OFICIAL GOOGLE (BLINDADA CONTRA LIMITES DE COTA) ---
+@st.cache_resource(show_spinner=False)
+def conectar_google():
     API_KEY = st.secrets["GOOGLE_MAPS_API_KEY"]
     URL_PLANILHA = st.secrets["URL_PLANILHA"]
-    gmaps = googlemaps.Client(key=API_KEY)
+    cliente_gmaps = googlemaps.Client(key=API_KEY)
     
     credenciais_dict = dict(st.secrets["credenciais_google"])
     credenciais_dict["private_key"] = credenciais_dict["private_key"].replace("\\n", "\n")
     
     gc = gspread.service_account_from_dict(credenciais_dict)
-    planilha = gc.open_by_url(URL_PLANILHA)
+    plan = gc.open_by_url(URL_PLANILHA)
     
-    aba_banco = planilha.worksheet("locais")
-    aba_historico = planilha.worksheet("historico_rotas")
-    aba_veiculo = planilha.worksheet("historico_veiculo")
+    a_banco = plan.worksheet("locais")
+    a_historico = plan.worksheet("historico_rotas")
+    a_veiculo = plan.worksheet("historico_veiculo")
     
+    return cliente_gmaps, a_banco, a_historico, a_veiculo
+
+try:
+    gmaps, aba_banco, aba_historico, aba_veiculo = conectar_google()
 except Exception as e:
-    st.error(f"⚠️ Erro ao aceder ao sistema do Google. Verifique se criou a aba 'historico_veiculo'. Detalhe: {e}")
+    st.error(f"⚠️ Erro ao aceder ao sistema do Google: {e}")
     st.stop()
 
-# --- SISTEMA DE CACHE PARA PROTEGER CONTRA BLOQUEIOS DO GOOGLE ---
+# --- SISTEMA DE CACHE PARA LEITURA DE DADOS ---
 @st.cache_data(ttl=600, show_spinner=False)
 def buscar_dados():
     try:
@@ -461,7 +466,6 @@ elif aba == "📊 Relatórios de Rotas":
                 "⚙️ Detalhar e Editar"
             ])
             
-            # --- ABA 1: HISTÓRICO GERAL (COM BOTÃO IMPRIMIR) ---
             with tab_geral:
                 if 'DATA' in df_hist.columns:
                     datas_disponiveis = df_hist['DATA'].unique().tolist()
@@ -477,9 +481,8 @@ elif aba == "📊 Relatórios de Rotas":
                 
                     st.dataframe(df_exibicao, use_container_width=True, hide_index=True)
                     
-                    st.write("") # Espaçamento
+                    st.write("") 
                     
-                    # Criação dos botões de Descarregar e Imprimir
                     col_btn1, col_btn2, col_vazia = st.columns([1, 1, 2])
                     with col_btn1:
                         csv = df_exibicao.to_csv(index=False).encode('utf-8')
@@ -491,7 +494,6 @@ elif aba == "📊 Relatórios de Rotas":
                             use_container_width=True
                         )
                     with col_btn2:
-                        # Injeção segura de HTML/JavaScript para acionar a impressora
                         components.html(
                             """
                             <script>
@@ -513,7 +515,6 @@ elif aba == "📊 Relatórios de Rotas":
                             height=45
                         )
             
-            # --- ABA 2: RELATÓRIO AGRUPADO (COM BOTÃO IMPRIMIR) ---
             with tab_agrupado:
                 st.info("💡 **Dica:** Marque as caixas na coluna 'SELECIONAR' para escolher rotas específicas. O sistema irá somar a quilometragem e mostrar os condomínios mais visitados nas rotas escolhidas.")
                 
@@ -565,7 +566,6 @@ elif aba == "📊 Relatórios de Rotas":
                     
                     st.write("---")
                     
-                    # Botão de impressão do relatório agrupado
                     col_btn_imp, col_vazia_imp = st.columns([1, 3])
                     with col_btn_imp:
                         components.html(
@@ -589,7 +589,6 @@ elif aba == "📊 Relatórios de Rotas":
                             height=45
                         )
 
-            # --- ABA 3: DETALHAR, EDITAR E EXCLUIR ---
             with tab_edicao:
                 st.subheader("⚙️ Detalhar, Editar ou Excluir Rotas")
                 
