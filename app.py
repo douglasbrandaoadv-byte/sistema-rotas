@@ -8,6 +8,7 @@ import json
 from datetime import datetime
 import pytz
 import streamlit.components.v1 as components
+import base64
 
 st.set_page_config(page_title="Rota Inteligente - Renove", layout="wide")
 
@@ -405,7 +406,42 @@ elif aba == "🚚 Gerar Intinerário":
                 
                 nomes_rota_historico = []
                 
+                # --- MONTAGEM DO HTML INVISÍVEL PARA IMPRESSÃO ECONÔMICA ---
+                fuso_jp = pytz.timezone('America/Fortaleza')
+                agora = datetime.now(fuso_jp)
+                hoje_str = agora.strftime("%d/%m/%Y às %H:%M")
+                
+                html_rel = f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Relatório da Rota Oficial</title>
+                    <style>
+                        body {{ font-family: Arial, sans-serif; font-size: 12px; color: #000; padding: 10px; margin: 0; }}
+                        .container {{ width: 100%; max-width: 800px; margin: 0 auto; }}
+                        h2 {{ text-align: center; font-size: 18px; border-bottom: 2px solid #000; padding-bottom: 5px; margin-bottom: 5px; }}
+                        .data-hora {{ text-align: center; font-size: 10px; margin-top: 0; margin-bottom: 15px; color: #333; }}
+                        .resumo {{ margin-bottom: 15px; padding: 10px; border: 1px solid #000; border-radius: 4px; background-color: #f9f9f9; }}
+                        .parada {{ margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px dashed #aaa; page-break-inside: avoid; line-height: 1.5; }}
+                        .urgente {{ color: #d93025; font-weight: bold; border: 1px solid #d93025; padding: 1px 3px; border-radius: 3px; font-size: 10px; margin-left: 5px; }}
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <h2>RELATÓRIO DA ROTA OFICIAL</h2>
+                        <p class="data-hora">Gerado em: {hoje_str}</p>
+                        
+                        <div class="resumo">
+                            <strong>INÍCIO:</strong> {partida}<br>
+                            <strong>DESTINO FINAL:</strong> {destino_final_renove}<br>
+                            <strong>DISTÂNCIA TOTAL:</strong> {distancia_texto}
+                        </div>
+                        
+                        <h3>Itinerário:</h3>
+                """
+                
                 for i, item in enumerate(rota_final):
+                    # Impressão na tela normal
                     tag_urgente = "🚨 **URGENTE** | " if item["urgente"] else ""
                     st.write(f"**{i+1}ª Parada - {item['nome']}** | {tag_urgente}🎯 {item['missao']}")
                     st.write(f"📍 {item['endereco']}")
@@ -413,16 +449,29 @@ elif aba == "🚚 Gerar Intinerário":
                         st.caption(f"📝 Obs: {item['obs']}")
                     st.divider()
                     
+                    # Continuação da montagem do HTML para papel
+                    tag_urg_html = "<span class='urgente'>URGENTE</span>" if item["urgente"] else ""
+                    obs_html = f"<br><em>Obs: {item['obs']}</em>" if item['obs'] else ""
+                    html_rel += f"""
+                    <div class="parada">
+                        <strong>{i+1}º Destino: {item['nome']}</strong> {tag_urg_html}<br>
+                        Tarefa: {item['missao']}<br>
+                        Endereço: {item['endereco']}
+                        {obs_html}
+                    </div>
+                    """
+                    
                     nome_hist = f"🚨 {item['nome']}" if item["urgente"] else item['nome']
                     nomes_rota_historico.append(nome_hist)
+                
+                # Finaliza HTML
+                html_rel += "</div></body></html>"
+                b64_html_rel = base64.b64encode(html_rel.encode('utf-8')).decode('utf-8')
                 
                 st.success(f"🏁 **DESTINO FINAL:** Sede da Administradora ({destino_final_renove})")
                 nomes_rota_historico.append("Sede Renove")
                 
                 if not st.session_state.historico_salvo:
-                    fuso_jp = pytz.timezone('America/Fortaleza')
-                    agora = datetime.now(fuso_jp)
-                    
                     linha_historico = [
                         agora.strftime("%d/%m/%Y"),
                         agora.strftime("%H:%M"),
@@ -440,7 +489,7 @@ elif aba == "🚚 Gerar Intinerário":
                 
                 st.write("")
                 
-                # --- NOVOS BOTOES DE IMPRESSÃO E NOVA ROTA ---
+                # --- BOTÕES FINAIS ---
                 col_btn_nova, col_btn_imp = st.columns(2)
                 with col_btn_nova:
                     if st.button("🔄 Planejar Nova Rota", use_container_width=True):
@@ -448,26 +497,44 @@ elif aba == "🚚 Gerar Intinerário":
                         st.session_state.historico_salvo = False
                         st.rerun()
                 with col_btn_imp:
-                    components.html(
-                        """
-                        <script>
-                        function imprimir() {
-                            try { window.parent.print(); } catch (e) { window.print(); }
-                        }
-                        </script>
-                        <style>
-                        body { margin: 0; padding: 0; overflow: hidden; }
-                        button {
-                            background-color: #ffffff; border: 1px solid rgba(49, 51, 63, 0.2); border-radius: 0.5rem; 
-                            color: #31333f; cursor: pointer; font-family: 'Source Sans Pro', sans-serif; font-size: 1rem; 
-                            padding: 0.45rem 0.75rem; width: 100%; line-height: 1.6; transition: 0.2s;
-                        }
-                        button:hover { border-color: #ff4b4b; color: #ff4b4b; }
-                        </style>
-                        <button onclick="imprimir()">🖨️ Imprimir Relatório da Rota</button>
-                        """,
-                        height=45
-                    )
+                    # Script inteligente que cria uma janela invisível e imprime apenas a rota limpa
+                    js_impressao_rota = f"""
+                    <script>
+                    function imprimirRelatorio() {{
+                        const htmlContent = decodeURIComponent(escape(window.atob('{b64_html_rel}')));
+                        const iframe = document.createElement('iframe');
+                        iframe.style.position = 'absolute';
+                        iframe.style.width = '0px';
+                        iframe.style.height = '0px';
+                        iframe.style.border = 'none';
+                        document.body.appendChild(iframe);
+                        
+                        const doc = iframe.contentWindow.document;
+                        doc.open();
+                        doc.write(htmlContent);
+                        doc.close();
+                        
+                        setTimeout(function() {{
+                            iframe.contentWindow.focus();
+                            iframe.contentWindow.print();
+                            setTimeout(function() {{
+                                document.body.removeChild(iframe);
+                            }}, 1000);
+                        }}, 500);
+                    }}
+                    </script>
+                    <style>
+                    body {{ margin: 0; padding: 0; overflow: hidden; }}
+                    button {{
+                        background-color: #ffffff; border: 1px solid rgba(49, 51, 63, 0.2); border-radius: 0.5rem; 
+                        color: #31333f; cursor: pointer; font-family: 'Source Sans Pro', sans-serif; font-size: 1rem; 
+                        padding: 0.45rem 0.75rem; width: 100%; line-height: 1.6; transition: 0.2s;
+                    }}
+                    button:hover {{ border-color: #ff4b4b; color: #ff4b4b; }}
+                    </style>
+                    <button onclick="imprimirRelatorio()">🖨️ Imprimir Relatório da Rota</button>
+                    """
+                    components.html(js_impressao_rota, height=45)
                     
             except Exception as e:
                 st.error(f"Falha ao processar rota final: {e}")
@@ -507,6 +574,25 @@ elif aba == "📊 Relatórios de Rotas":
                 
                     st.dataframe(df_exibicao, use_container_width=True, hide_index=True)
                     
+                    # Montagem do HTML limpo para imprimir a tabela do Histórico
+                    html_tabela_hist = df_exibicao.to_html(index=False, border=1, justify="left")
+                    html_hist = f"""
+                    <!DOCTYPE html>
+                    <html><head><title>Histórico de Rotas</title>
+                    <style>
+                        body {{ font-family: Arial, sans-serif; font-size: 10px; color: #000; }}
+                        table {{ border-collapse: collapse; width: 100%; }}
+                        th, td {{ border: 1px solid #000; padding: 4px; text-align: left; word-wrap: break-word; }}
+                        th {{ background-color: #ddd; }}
+                        h2 {{ text-align: center; }}
+                    </style>
+                    </head><body>
+                    <h2>Histórico de Rotas - {data_selecionada}</h2>
+                    {html_tabela_hist}
+                    </body></html>
+                    """
+                    b64_html_hist = base64.b64encode(html_hist.encode('utf-8')).decode('utf-8')
+                    
                     st.write("") 
                     
                     col_btn1, col_btn2, col_vazia = st.columns([1, 1, 2])
@@ -520,26 +606,29 @@ elif aba == "📊 Relatórios de Rotas":
                             use_container_width=True
                         )
                     with col_btn2:
-                        components.html(
-                            """
-                            <script>
-                            function imprimir() {
-                                try { window.parent.print(); } catch (e) { window.print(); }
-                            }
-                            </script>
-                            <style>
-                            body { margin: 0; padding: 0; overflow: hidden; }
-                            button {
-                                background-color: #ffffff; border: 1px solid rgba(49, 51, 63, 0.2); border-radius: 0.5rem; 
-                                color: #31333f; cursor: pointer; font-family: 'Source Sans Pro', sans-serif; font-size: 1rem; 
-                                padding: 0.45rem 0.75rem; width: 100%; line-height: 1.6; transition: 0.2s;
-                            }
-                            button:hover { border-color: #ff4b4b; color: #ff4b4b; }
-                            </style>
-                            <button onclick="imprimir()">🖨️ Imprimir Tabela</button>
-                            """,
-                            height=45
-                        )
+                        js_imp_hist = f"""
+                        <script>
+                        function imprimirTabela() {{
+                            const htmlContent = decodeURIComponent(escape(window.atob('{b64_html_hist}')));
+                            const iframe = document.createElement('iframe');
+                            iframe.style.position = 'absolute'; iframe.style.width = '0px'; iframe.style.height = '0px'; iframe.style.border = 'none';
+                            document.body.appendChild(iframe);
+                            const doc = iframe.contentWindow.document;
+                            doc.open(); doc.write(htmlContent); doc.close();
+                            setTimeout(function() {{
+                                iframe.contentWindow.focus(); iframe.contentWindow.print();
+                                setTimeout(function() {{ document.body.removeChild(iframe); }}, 1000);
+                            }}, 500);
+                        }}
+                        </script>
+                        <style>
+                        body {{ margin: 0; padding: 0; overflow: hidden; }}
+                        button {{ background-color: #ffffff; border: 1px solid rgba(49, 51, 63, 0.2); border-radius: 0.5rem; color: #31333f; cursor: pointer; font-family: 'Source Sans Pro', sans-serif; font-size: 1rem; padding: 0.45rem 0.75rem; width: 100%; line-height: 1.6; transition: 0.2s; }}
+                        button:hover {{ border-color: #ff4b4b; color: #ff4b4b; }}
+                        </style>
+                        <button onclick="imprimirTabela()">🖨️ Imprimir Tabela</button>
+                        """
+                        components.html(js_imp_hist, height=45)
             
             with tab_agrupado:
                 st.info("💡 **Dica:** Marque as caixas na coluna 'SELECIONAR' para escolher rotas específicas. O sistema irá somar a quilometragem e mostrar os condomínios mais visitados nas rotas escolhidas.")
@@ -584,36 +673,64 @@ elif aba == "📊 Relatórios de Rotas":
                     
                     c_res1.metric("🛣️ Quilometragem Total (Soma)", f"{total_km:.1f} km", f"{len(rotas_selecionadas)} rotas selecionadas")
                     
+                    html_tabela_rank = ""
                     if todos_destinos:
                         contagem = pd.Series(todos_destinos).value_counts().reset_index()
                         contagem.columns = ["Condomínio / Local", "Qtd. de Visitas"]
                         c_res2.write("**🏆 Locais mais frequentes:**")
                         c_res2.dataframe(contagem, hide_index=True, use_container_width=True)
+                        html_tabela_rank = contagem.to_html(index=False, border=1, justify="left")
                     
+                    # Montagem do HTML limpo para imprimir o Relatório Agrupado
+                    html_agrup = f"""
+                    <!DOCTYPE html>
+                    <html><head><title>Relatório Agrupado</title>
+                    <style>
+                        body {{ font-family: Arial, sans-serif; font-size: 12px; color: #000; margin:20px;}}
+                        table {{ border-collapse: collapse; width: 100%; margin-top: 10px; }}
+                        th, td {{ border: 1px solid #000; padding: 5px; text-align: left; }}
+                        th {{ background-color: #ddd; }}
+                        .resumo {{ border: 1px solid #000; padding: 10px; margin-bottom: 20px; }}
+                    </style>
+                    </head><body>
+                    <h2>Relatório Agrupado de Rotas</h2>
+                    <div class="resumo">
+                        <p><strong>Total de Rotas Selecionadas:</strong> {len(rotas_selecionadas)}</p>
+                        <p><strong>Quilometragem Total (Soma):</strong> {total_km:.1f} km</p>
+                    </div>
+                    """
+                    if html_tabela_rank:
+                        html_agrup += f"<h3>Locais mais frequentes nestas rotas:</h3>{html_tabela_rank}"
+                    html_agrup += "</body></html>"
+                    b64_html_agrup = base64.b64encode(html_agrup.encode('utf-8')).decode('utf-8')
+
                     st.write("---")
                     
                     col_btn_imp, col_vazia_imp = st.columns([1, 3])
                     with col_btn_imp:
-                        components.html(
-                            """
-                            <script>
-                            function imprimir() {
-                                try { window.parent.print(); } catch (e) { window.print(); }
-                            }
-                            </script>
-                            <style>
-                            body { margin: 0; padding: 0; overflow: hidden; }
-                            button {
-                                background-color: #ffffff; border: 1px solid rgba(49, 51, 63, 0.2); border-radius: 0.5rem; 
-                                color: #31333f; cursor: pointer; font-family: 'Source Sans Pro', sans-serif; font-size: 1rem; 
-                                padding: 0.45rem 0.75rem; width: 100%; line-height: 1.6; transition: 0.2s;
-                            }
-                            button:hover { border-color: #ff4b4b; color: #ff4b4b; }
-                            </style>
-                            <button onclick="imprimir()">🖨️ Imprimir Relatório</button>
-                            """,
-                            height=45
-                        )
+                        js_imp_agrup = f"""
+                        <script>
+                        function imprimirAgrupado() {{
+                            const htmlContent = decodeURIComponent(escape(window.atob('{b64_html_agrup}')));
+                            const iframe = document.createElement('iframe');
+                            iframe.style.position = 'absolute'; iframe.style.width = '0px'; iframe.style.height = '0px'; iframe.style.border = 'none';
+                            document.body.appendChild(iframe);
+                            const doc = iframe.contentWindow.document;
+                            doc.open(); doc.write(htmlContent); doc.close();
+                            setTimeout(function() {{
+                                iframe.contentWindow.focus(); iframe.contentWindow.print();
+                                setTimeout(function() {{ document.body.removeChild(iframe); }}, 1000);
+                            }}, 500);
+                        }}
+                        </script>
+                        <style>
+                        body {{ margin: 0; padding: 0; overflow: hidden; }}
+                        button {{ background-color: #ffffff; border: 1px solid rgba(49, 51, 63, 0.2); border-radius: 0.5rem; color: #31333f; cursor: pointer; font-family: 'Source Sans Pro', sans-serif; font-size: 1rem; padding: 0.45rem 0.75rem; width: 100%; line-height: 1.6; transition: 0.2s; }}
+                        button:hover {{ border-color: #ff4b4b; color: #ff4b4b; }}
+                        </style>
+                        <button onclick="imprimirAgrupado()">🖨️ Imprimir Relatório</button>
+                        """
+                        components.html(js_imp_agrup, height=45)
 
             with tab_edicao:
                 st.subheader("⚙️ Detalhar, Editar ou Excluir Rotas")
