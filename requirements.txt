@@ -1,4 +1,6 @@
 streamlit
 pandas
 googlemaps
-st-gsheets-connection
+gspread
+gspread-dataframe
+pytz
