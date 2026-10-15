@@ -8,9 +8,46 @@ from datetime import datetime
 import pytz
 import streamlit.components.v1 as components
 import base64
+import os
 
 # Configuração de ecrã para ocupar toda a largura
-st.set_page_config(page_title="Rota Inteligente - Renove", layout="wide")
+st.set_page_config(page_title="Rota Inteligente - Renove", layout="wide", page_icon="🏢")
+
+# ==========================================================
+# ESTILIZAÇÃO VISUAL (CSS) - PALETA RENOVE
+# ==========================================================
+COR_ESCURA = "#313753"  # Azul Marinho da Logo
+COR_CLARA = "#4D648D"   # Azul Aço da Logo
+
+st.markdown(f"""
+<style>
+    /* Cores dos Cabeçalhos */
+    h1, h2, h3, h4, h5, h6 {{
+        color: {COR_ESCURA} !important;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }}
+    
+    /* Fundo do Menu Lateral */
+    [data-testid="stSidebar"] {{
+        background-color: #f4f6f9;
+        border-right: 2px solid {COR_CLARA};
+    }}
+    
+    /* Cor principal de destaque (Métricas, links) */
+    a {{ color: {COR_CLARA}; font-weight: bold; }}
+    [data-testid="stMetricValue"] {{ color: {COR_ESCURA} !important; }}
+    
+    /* Personalização das Abas (Tabs) */
+    .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {{
+        font-size: 16px;
+        font-weight: 600;
+        color: {COR_ESCURA};
+    }}
+    .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {{
+        border-bottom-color: {COR_CLARA} !important;
+    }}
+</style>
+""", unsafe_allow_html=True)
 
 # --- CONEXÃO OFICIAL GOOGLE ---
 @st.cache_resource(show_spinner=False)
@@ -72,22 +109,34 @@ elif 'logado' not in st.session_state:
 if 'lote_key' not in st.session_state: st.session_state.lote_key = 0
 
 if not st.session_state.logado:
-    st.title("🔐 Acesso Restrito - Renove Administradora")
-    if st.text_input("Senha", type="password") == "admin123":
-        if st.button("Entrar", type="primary"):
-            st.session_state.logado = True
-            st.query_params["acesso"] = "permitido"
-            st.rerun()
+    st.markdown(f"<h1 style='text-align: center; color: {COR_ESCURA};'>🔐 Acesso Restrito</h1>", unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c2:
+        try:
+            st.image("Renove logo PNG.png", use_container_width=True)
+        except:
+            pass
+        if st.text_input("Senha", type="password") == "admin123":
+            if st.button("Entrar no Sistema", type="primary", use_container_width=True):
+                st.session_state.logado = True
+                st.query_params["acesso"] = "permitido"
+                st.rerun()
     st.stop()
 
 # ==========================================================
-# MENU LATERAL (FOCO EM ACESSIBILIDADE)
+# MENU LATERAL - LOGOMARCA E NAVEGAÇÃO
 # ==========================================================
 if 'menu_atual' not in st.session_state:
     st.session_state.menu_atual = "📍 Gestão de Locais"
 
-st.sidebar.success("✅ Sistema Online e Conectado")
-st.sidebar.markdown("### 🧭 MENU DE NAVEGAÇÃO")
+# Inserção da Logomarca no topo do menu lateral
+try:
+    st.sidebar.image("Renove logo PNG.png", use_container_width=True)
+except Exception:
+    st.sidebar.markdown(f"<h2 style='text-align: center; color: {COR_ESCURA};'>RENOVE<br><small style='font-size:12px;'>ADMINISTRADORA</small></h2>", unsafe_allow_html=True)
+
+st.sidebar.markdown("---")
+st.sidebar.markdown(f"**🧭 MENU DE NAVEGAÇÃO**")
 
 opcoes_menu = [
     "📍 Gestão de Locais", 
@@ -118,7 +167,7 @@ aba = st.session_state.menu_atual
 # 📍 GESTÃO DE LOCAIS
 # ==========================================================
 if aba == "📍 Gestão de Locais":
-    st.header("Base de Dados de Condomínios")
+    st.markdown("<h1>Base de Dados de Condomínios</h1>", unsafe_allow_html=True)
     df_existente = buscar_dados()
     tab_cadastrados, tab_novo, tab_lote = st.tabs(["🏢 Empreendimentos Cadastrados", "➕ Adicionar Local", "📂 Cadastro em Lote"])
 
@@ -190,7 +239,7 @@ if aba == "📍 Gestão de Locais":
 # 🚚 GERAR INTINERÁRIO
 # ==========================================================
 elif aba == "🚚 Gerar Intinerário":
-    st.header("Cálculo de Rota e Gestão de Urgências")
+    st.markdown("<h1>Cálculo de Rota e Gestão de Urgências</h1>", unsafe_allow_html=True)
     df_locais = buscar_dados()
     if df_locais.empty: st.warning("Cadastre locais no menu 'Gestão de Locais' primeiro.")
     else:
@@ -203,14 +252,14 @@ elif aba == "🚚 Gerar Intinerário":
             qtd = st.number_input("Número de diligências hoje:", min_value=1, step=1)
             selecionados = []
             for i in range(int(qtd)):
-                st.markdown(f"### Diligência {i+1}")
+                st.markdown(f"<h3 style='color:{COR_CLARA};'>Diligência {i+1}</h3>", unsafe_allow_html=True)
                 c1, c2 = st.columns(2)
                 n_sel = c1.selectbox("Selecione o Local", df_locais['NOME'].unique(), key=f"l_{i}")
                 m_sel = c2.selectbox("Tarefa", ["ENTREGA DE BOLETOS", "NOTIFICAÇÃO", "RECOLHER ATAS", "DOCUMENTOS", "FOLHA DE PAGAMENTO"], key=f"m_{i}")
                 
                 c3, c4 = st.columns([3, 1])
                 obs = c3.text_input("Observações (Ex: Falar com portaria, deixar na caixa)", key=f"o_{i}")
-                st.write("") # Espaço para alinhar
+                st.write("") 
                 urg = c4.checkbox("🚨 MARCAR COMO URGENTE", key=f"u_{i}")
                 
                 r = df_locais[df_locais['NOME'] == n_sel].iloc[0]
@@ -241,7 +290,7 @@ elif aba == "🚚 Gerar Intinerário":
                 with st.container():
                     c1, c2, c3 = st.columns([1, 6, 2])
                     with c1:
-                        st.markdown(f"<h2>{i+1}º</h2>", unsafe_allow_html=True)
+                        st.markdown(f"<h2 style='color:{COR_CLARA};'>{i+1}º</h2>", unsafe_allow_html=True)
                         sc1, sc2 = st.columns(2)
                         if sc1.button("⬆️", key=f"u_{i}", disabled=(i==0)):
                             st.session_state.rota_provisoria[i], st.session_state.rota_provisoria[i-1] = st.session_state.rota_provisoria[i-1], st.session_state.rota_provisoria[i]
@@ -276,22 +325,22 @@ elif aba == "🚚 Gerar Intinerário":
 
                 st.subheader("📋 Relatório da Rota Oficial")
                 
-                # HTML DE IMPRESSÃO (Agora inclui Observações com codificação perfeita)
                 fuso = pytz.timezone('America/Fortaleza')
                 agora = datetime.now(fuso)
                 
+                # HTML DE IMPRESSÃO (Com as cores da Renove)
                 html_imp = f"""<div style='font-family: Arial, sans-serif; font-size:16px; color:#000;'>
-                <h2 style='border-bottom: 2px solid #000; padding-bottom:10px;'>ITINERÁRIO OFICIAL</h2>
+                <h2 style='color: {COR_ESCURA}; border-bottom: 2px solid {COR_CLARA}; padding-bottom:10px;'>ITINERÁRIO OFICIAL RENOVE</h2>
                 <p><strong>Data:</strong> {agora.strftime('%d/%m/%Y às %H:%M')}<br>
                 <strong>Partida:</strong> {partida}<br>
                 <strong>KM Total Estimado:</strong> {dist}</p>
-                <hr style='border:1px solid #000;'>
+                <hr style='border:1px solid {COR_ESCURA};'>
                 """
                 
                 obs_banco = []
 
                 for i, item in enumerate(rota):
-                    st.write(f"### {i+1}º - {item['nome']} {'🚨' if item['urgente'] else ''}")
+                    st.markdown(f"<h3 style='color:{COR_CLARA};'>{i+1}º - {item['nome']} {'🚨' if item['urgente'] else ''}</h3>", unsafe_allow_html=True)
                     st.write(f"**Tarefa:** {item['missao']} | **Endereço:** {item['endereco']}")
                     if item['obs']:
                         st.info(f"**Observação:** {item['obs']}")
@@ -299,7 +348,7 @@ elif aba == "🚚 Gerar Intinerário":
                     st.divider()
                     
                     html_imp += f"""<p style='margin-bottom:15px; line-height:1.5;'>
-                    <strong>{i+1}º - {item['nome']}</strong> {'<strong style="color:red;">(URGENTE)</strong>' if item['urgente'] else ''}<br>
+                    <strong style='color:{COR_ESCURA};'>{i+1}º - {item['nome']}</strong> {'<strong style="color:red;">(URGENTE)</strong>' if item['urgente'] else ''}<br>
                     <strong>Tarefa:</strong> {item['missao']}<br>
                     <strong>Endereço:</strong> {item['endereco']}"""
                     
@@ -307,7 +356,7 @@ elif aba == "🚚 Gerar Intinerário":
                         html_imp += f"<br><strong>Observação:</strong> <em>{item['obs']}</em>"
                     html_imp += "</p><hr style='border-top:1px dashed #ccc;'>"
                 
-                html_imp += f"<p><strong>Destino Final:</strong> Sede da Administradora ({dest_final})</p></div>"
+                html_imp += f"<p style='color:{COR_ESCURA};'><strong>Destino Final:</strong> Sede da Administradora ({dest_final})</p></div>"
                 
                 b64 = base64.b64encode(html_imp.encode('utf-8')).decode('utf-8')
 
@@ -331,7 +380,7 @@ elif aba == "🚚 Gerar Intinerário":
                             setTimeout(()=>{{i.contentWindow.print();}}, 500);
                         }}
                         </script>
-                        <button style='width:100%; height:42px; background-color:#ffffff; color:#31333f; font-weight:bold; border-radius:8px; border:1px solid #ccc; cursor:pointer;' onclick='imp()'>🖨️ IMPRIMIR ESTE RELATÓRIO</button>
+                        <button style='width:100%; height:42px; background-color:{COR_CLARA}; color:#ffffff; font-weight:bold; border-radius:8px; border:none; cursor:pointer;' onclick='imp()'>🖨️ IMPRIMIR ESTE RELATÓRIO</button>
                     """, height=50)
 
                 if not st.session_state.historico_salvo:
@@ -354,10 +403,9 @@ elif aba == "🚚 Gerar Intinerário":
 # 📊 RELATÓRIOS DE ROTAS
 # ==========================================================
 elif aba == "📊 Relatórios de Rotas":
-    st.header("Gestão de Rotas Geradas")
+    st.markdown("<h1>Gestão de Rotas Geradas</h1>", unsafe_allow_html=True)
     dados = buscar_historico()
     
-    # Proteção de contagem len() == 0 previne o erro "Truth value of a DataFrame is ambiguous"
     if len(dados) == 0: 
         st.info("Nenhuma rota registada.")
     else:
@@ -369,27 +417,26 @@ elif aba == "📊 Relatórios de Rotas":
         t1, t2, t3 = st.tabs(["📋 Histórico Completo", "📈 Somatória e Agrupamentos", "⚙️ Detalhar, Editar e Imprimir"])
         
         with t1:
-            st.markdown("### Visualização Geral")
+            st.markdown(f"<h3 style='color:{COR_CLARA};'>Visualização Geral</h3>", unsafe_allow_html=True)
             datas = df['DATA'].unique().tolist()[::-1]
             sel_data = st.selectbox("Filtrar Tabela por Data:", ["Todas as Datas"] + datas)
             df_v = df if sel_data == "Todas as Datas" else df[df['DATA'] == sel_data]
             st.dataframe(df_v, hide_index=True, use_container_width=True)
             
         with t2:
-            st.markdown("### Cálculos por Seleção")
+            st.markdown(f"<h3 style='color:{COR_CLARA};'>Cálculos por Seleção</h3>", unsafe_allow_html=True)
             st.caption("Marque as caixas das rotas que deseja somar.")
             df_sel = df.copy()
             df_sel.insert(0, "SELECIONAR", False)
             edit = st.data_editor(df_sel, hide_index=True, use_container_width=True, disabled=["DATA", "HORA", "PARTIDA", "ROTA", "KM TOTAL", "OBSERVAÇÕES"])
             
-            # Verificação segura de booleanos previne o erro de DataFrame
             selecionadas = edit[edit["SELECIONAR"] == True]
             if not selecionadas.empty:
                 total_km = sum([float(str(k).replace('km','').replace(',','.').strip()) for k in selecionadas["KM TOTAL"] if k])
                 st.metric("📏 Distância Total do Período Selecionado", f"{total_km:.1f} km")
         
         with t3:
-            st.markdown("### Ferramentas Individuais da Rota")
+            st.markdown(f"<h3 style='color:{COR_CLARA};'>Ferramentas Individuais da Rota</h3>", unsafe_allow_html=True)
             st.info("Selecione uma rota específica abaixo para visualizar detalhes, adicionar complementos ou imprimir a folha do percurso.")
             
             busca = st.text_input("🔍 Buscar por Local, Condomínio ou Data:").lower()
@@ -404,7 +451,6 @@ elif aba == "📊 Relatórios de Rotas":
             if opcoes:
                 sel = st.selectbox("Selecione a rota desejada:", opcoes, format_func=lambda x: x[1])
                 idx_df, resumo, row_dados = sel
-                
                 idx_sheets = idx_df + 2 
                 
                 st.divider()
@@ -439,20 +485,20 @@ elif aba == "📊 Relatórios de Rotas":
                 st.markdown("#### Impressão Rápida")
                 lista_locais = str(n_rota).split(" ➔ ")
                 html_imp_hist = f"""<div style='font-family: Arial, sans-serif; font-size:16px; color:#000;'>
-                <h2 style='border-bottom: 2px solid #000; padding-bottom:10px;'>ITINERÁRIO (REIMPRESSÃO)</h2>
+                <h2 style='color:{COR_ESCURA}; border-bottom: 2px solid {COR_CLARA}; padding-bottom:10px;'>ITINERÁRIO (REIMPRESSÃO)</h2>
                 <p><strong>Data de Referência:</strong> {n_data} às {n_hora}<br>
                 <strong>Partida:</strong> {n_partida}<br>
                 <strong>KM Total:</strong> {n_km}</p>
-                <hr style='border:1px solid #000;'>
+                <hr style='border:1px solid {COR_ESCURA};'>
                 """
                 
                 for idx_loc, loc in enumerate(lista_locais):
                     urg = "(URGENTE)" if "🚨" in loc else ""
                     nome_limpo = loc.replace("🚨 ", "")
-                    html_imp_hist += f"<p style='margin-bottom:10px; line-height:1.5;'><strong>{idx_loc+1}º - {nome_limpo}</strong> <strong style='color:red;'>{urg}</strong></p>"
+                    html_imp_hist += f"<p style='margin-bottom:10px; line-height:1.5;'><strong style='color:{COR_ESCURA};'>{idx_loc+1}º - {nome_limpo}</strong> <strong style='color:red;'>{urg}</strong></p>"
                 
                 if n_obs:
-                    html_imp_hist += f"<hr><p><strong>OBSERVAÇÕES DA ROTA:</strong><br>{n_obs}</p>"
+                    html_imp_hist += f"<hr><p style='color:{COR_ESCURA};'><strong>OBSERVAÇÕES DA ROTA:</strong><br>{n_obs}</p>"
                 
                 html_imp_hist += "</div>"
                 b64_hist = base64.b64encode(html_imp_hist.encode('utf-8')).decode('utf-8')
@@ -470,14 +516,14 @@ elif aba == "📊 Relatórios de Rotas":
                         setTimeout(()=>{{i.contentWindow.print();}}, 500);
                     }}
                     </script>
-                    <button style='width:100%; height:45px; background-color:#ffffff; color:#31333f; font-weight:bold; border-radius:8px; border:1px solid #ccc; cursor:pointer;' onclick='imp()'>🖨️ IMPRIMIR ESTA ROTA</button>
+                    <button style='width:100%; height:45px; background-color:{COR_CLARA}; color:#ffffff; font-weight:bold; border-radius:8px; border:none; cursor:pointer;' onclick='imp()'>🖨️ IMPRIMIR ESTA ROTA</button>
                 """, height=50)
 
 # ==========================================================
 # 🏍️ DADOS DO VEÍCULO E RELATÓRIOS
 # ==========================================================
 elif aba == "🏍️ Dados do Veículo":
-    st.header("Registo Diário da Frota")
+    st.markdown("<h1>Registo Diário da Frota</h1>", unsafe_allow_html=True)
     st.info("Preencha ao final do dia o uso e os gastos.")
     with st.form("veiculo"):
         c1, c2 = st.columns(2)
@@ -494,15 +540,14 @@ elif aba == "🏍️ Dados do Veículo":
             st.success("Dados da frota gravados com sucesso!")
 
 elif aba == "📑 Relatório de Veículos":
-    st.header("Gestão Financeira e de Rodagem")
-    st.markdown("### Cruzamento de Custos e Distância")
+    st.markdown("<h1>Gestão Financeira e de Rodagem</h1>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='color:{COR_CLARA};'>Cruzamento de Custos e Distância</h3>", unsafe_allow_html=True)
     periodo = st.date_input("Selecione o Período (Início e Fim):", [])
     
     if len(periodo) == 2:
         inicio, fim = periodo
         dados_v = buscar_veiculo()
         
-        # Proteção extra len() para prevenir o erro de Pandas
         if len(dados_v) > 0:
             df_v = pd.DataFrame(dados_v)
             df_v['dt'] = pd.to_datetime(df_v['DATA'], format='%d/%m/%Y').dt.date
