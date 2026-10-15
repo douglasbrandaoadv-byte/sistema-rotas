@@ -4,15 +4,15 @@ import gspread
 from gspread_dataframe import set_with_dataframe
 import googlemaps
 import urllib.parse
-import json
 from datetime import datetime
 import pytz
 import streamlit.components.v1 as components
 import base64
 
+# Configuração de ecrã para ocupar toda a largura (melhora a visualização)
 st.set_page_config(page_title="Rota Inteligente - Renove", layout="wide")
 
-# --- CONEXÃO OFICIAL GOOGLE (BLINDADA) ---
+# --- CONEXÃO OFICIAL GOOGLE ---
 @st.cache_resource(show_spinner=False)
 def conectar_google():
     API_KEY = st.secrets["GOOGLE_MAPS_API_KEY"]
@@ -74,86 +74,124 @@ if 'lote_key' not in st.session_state: st.session_state.lote_key = 0
 if not st.session_state.logado:
     st.title("🔐 Acesso Restrito - Renove Administradora")
     if st.text_input("Senha", type="password") == "admin123":
-        if st.button("Entrar"):
+        if st.button("Entrar", type="primary"):
             st.session_state.logado = True
             st.query_params["acesso"] = "permitido"
             st.rerun()
     st.stop()
 
-st.sidebar.success("✅ Conectado à Base de Dados")
-if st.sidebar.button("Terminar Sessão"):
-    st.session_state.logado = False
-    st.query_params.clear()
-    st.rerun()
+# ==========================================================
+# NOVO MENU LATERAL (FOCO EM ACESSIBILIDADE)
+# ==========================================================
+if 'menu_atual' not in st.session_state:
+    st.session_state.menu_atual = "📍 Gestão de Locais"
 
-aba = st.sidebar.radio("Navegação", [
+st.sidebar.success("✅ Sistema Online e Conectado")
+st.sidebar.markdown("### 🧭 MENU DE NAVEGAÇÃO")
+
+# Botões grandes e clicáveis para facilitar a visão
+opcoes_menu = [
     "📍 Gestão de Locais", 
     "🚚 Gerar Intinerário", 
     "📊 Relatórios de Rotas",
     "🏍️ Dados do Veículo",
     "📑 Relatório de Veículos"
-])
+]
 
-# --- GESTÃO DE LOCAIS ---
+for opcao in opcoes_menu:
+    # Destaca o botão da aba atual
+    tipo_botao = "primary" if st.session_state.menu_atual == opcao else "secondary"
+    if st.sidebar.button(opcao, use_container_width=True, type=tipo_botao):
+        st.session_state.menu_atual = opcao
+        st.rerun()
+
+st.sidebar.markdown("---")
+if st.sidebar.button("🚪 Terminar Sessão", use_container_width=True):
+    st.session_state.logado = False
+    st.query_params.clear()
+    st.rerun()
+
+aba = st.session_state.menu_atual
+
+# ==========================================================
+# 📍 GESTÃO DE LOCAIS
+# ==========================================================
 if aba == "📍 Gestão de Locais":
     st.header("Base de Dados de Condomínios")
     df_existente = buscar_dados()
     tab_cadastrados, tab_novo, tab_lote = st.tabs(["🏢 Empreendimentos Cadastrados", "➕ Adicionar Local", "📂 Cadastro em Lote"])
 
     with tab_cadastrados:
-        termo = st.text_input("🔍 Buscar Empreendimento:", "").strip().lower()
+        st.info("💡 **Dica:** Utilize a caixa de pesquisa abaixo para encontrar um local. Marque a caixa ao lado do nome para **Editar** ou **Excluir**.")
+        termo = st.text_input("🔍 Digite o nome, rua ou bairro para pesquisar:", "").strip().lower()
         df_display = df_existente.copy()
+        
         if termo:
             mask = df_display.apply(lambda row: row.astype(str).str.lower().str.contains(termo).any(), axis=1)
             df_display = df_display[mask]
         
         df_display.insert(0, "SELECIONAR", False)
-        df_editado = st.data_editor(df_display, column_config={"SELECIONAR": st.column_config.CheckboxColumn(required=True)}, disabled=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"], hide_index=True, use_container_width=True, key="editor_locais")
+        df_editado = st.data_editor(
+            df_display, 
+            column_config={"SELECIONAR": st.column_config.CheckboxColumn(required=True)}, 
+            disabled=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"], 
+            hide_index=True, 
+            use_container_width=True, 
+            key="editor_locais"
+        )
         sel = df_editado[df_editado["SELECIONAR"] == True]
         
         if not sel.empty:
+            st.divider()
             if len(sel) == 1:
                 idx = sel.index[0]
                 d_orig = df_existente.loc[idx]
+                st.subheader(f"✏️ Editando: {d_orig['NOME']}")
                 with st.form("form_edita"):
                     c1, c2 = st.columns(2)
-                    n_nome = c1.text_input("NOME", value=d_orig['NOME'])
+                    n_nome = c1.text_input("NOME DO LOCAL", value=d_orig['NOME'])
                     n_rua = c2.text_input("RUA", value=d_orig['RUA'])
                     n_num = c1.text_input("NÚMERO", value=str(d_orig['NUMERO']))
                     n_bair = c2.text_input("BAIRRO", value=d_orig['BAIRRO'])
                     n_cid = c1.text_input("CIDADE", value=d_orig['CIDADE'])
                     n_est = c2.text_input("ESTADO", value=d_orig['ESTADO'])
-                    if st.form_submit_button("✅ Guardar"):
+                    if st.form_submit_button("✅ Salvar Alterações", type="primary"):
                         df_existente.loc[idx] = [n_nome, n_rua, n_num, n_bair, n_cid, n_est]
                         salvar_dados(df_existente)
+                        st.success("Informações atualizadas com sucesso!")
                         st.rerun()
-            if st.button("🗑️ Excluir Selecionado(s)", type="primary"):
+            if st.button("🗑️ Excluir Selecionado(s) Definitivamente", type="secondary"):
                 salvar_dados(df_existente.drop(sel.index.tolist()))
                 st.rerun()
 
     with tab_novo:
         with st.form("novo"):
             c1, c2 = st.columns(2)
-            n = c1.text_input("NOME")
+            n = c1.text_input("NOME DO LOCAL")
             r = c2.text_input("RUA")
             nu = c1.text_input("NÚMERO")
             b = c2.text_input("BAIRRO")
-            if st.form_submit_button("Guardar"):
+            if st.form_submit_button("Guardar Novo Local", type="primary"):
                 salvar_dados(pd.concat([df_existente, pd.DataFrame([[n, r, nu, b, "João Pessoa", "PB"]], columns=df_existente.columns)], ignore_index=True))
+                st.success("Local cadastrado!")
                 st.rerun()
 
     with tab_lote:
+        st.info("Preencha as linhas vazias e clique no botão abaixo para salvar vários locais de uma vez.")
         df_lote = st.data_editor(pd.DataFrame([["", "", "", "", "João Pessoa", "PB"]]*5, columns=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"]), num_rows="dynamic", key=f"lote_{st.session_state.lote_key}")
-        if st.button("🚀 Cadastrar"):
+        if st.button("🚀 Cadastrar Lote em Massa", type="primary"):
             salvar_dados(pd.concat([df_existente, df_lote[df_lote["NOME"] != ""]], ignore_index=True))
             st.session_state.lote_key += 1
+            st.success("Lote salvo com sucesso!")
             st.rerun()
 
-# --- GERAR INTINERÁRIO ---
+# ==========================================================
+# 🚚 GERAR INTINERÁRIO
+# ==========================================================
 elif aba == "🚚 Gerar Intinerário":
     st.header("Cálculo de Rota e Gestão de Urgências")
     df_locais = buscar_dados()
-    if df_locais.empty: st.warning("Cadastre locais primeiro.")
+    if df_locais.empty: st.warning("Cadastre locais no menu 'Gestão de Locais' primeiro.")
     else:
         if 'etapa_rota' not in st.session_state:
             st.session_state.etapa_rota = 0
@@ -164,48 +202,62 @@ elif aba == "🚚 Gerar Intinerário":
             qtd = st.number_input("Número de diligências hoje:", min_value=1, step=1)
             selecionados = []
             for i in range(int(qtd)):
-                st.markdown("---")
-                c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
-                n_sel = c1.selectbox(f"Diligência {i+1}", df_locais['NOME'].unique(), key=f"l_{i}")
+                st.markdown(f"### Diligência {i+1}")
+                c1, c2 = st.columns(2)
+                n_sel = c1.selectbox("Selecione o Local", df_locais['NOME'].unique(), key=f"l_{i}")
                 m_sel = c2.selectbox("Tarefa", ["ENTREGA DE BOLETOS", "NOTIFICAÇÃO", "RECOLHER ATAS", "DOCUMENTOS", "FOLHA DE PAGAMENTO"], key=f"m_{i}")
-                obs = c3.text_input("Obs", key=f"o_{i}")
-                urg = c4.checkbox("🚨 URGÊNCIA", key=f"u_{i}")
+                
+                c3, c4 = st.columns([3, 1])
+                obs = c3.text_input("Observações (Ex: Falar com portaria, deixar na caixa)", key=f"o_{i}")
+                st.write("") # Espaço para alinhar
+                urg = c4.checkbox("🚨 MARCAR COMO URGENTE", key=f"u_{i}")
+                
                 r = df_locais[df_locais['NOME'] == n_sel].iloc[0]
                 end = f"{r['RUA']}, {r['NUMERO']}, {r['BAIRRO']}, {r['CIDADE']}, {r['ESTADO']}"
                 selecionados.append({"nome": n_sel, "endereco": end, "missao": m_sel, "obs": obs, "urgente": urg})
+                st.divider()
 
-            partida = st.text_input("Partida:", value="João Pessoa, PB")
+            st.markdown("### Partida e Geração")
+            partida = st.text_input("Ponto de Partida:", value="João Pessoa, PB")
             dest_final = "Rua Rodrigues de Aquino, 267, Centro, João Pessoa, PB"
 
-            if st.button("⚙️ Gerar Rota Provisória"):
-                try:
-                    waypoints = [s['endereco'] for s in selecionados]
-                    res = gmaps.directions(partida, dest_final, waypoints=waypoints, optimize_waypoints=True)
-                    st.session_state.rota_provisoria = [selecionados[i] for i in res[0]['waypoint_order']]
-                    st.session_state.partida = partida
-                    st.session_state.etapa_rota = 1
-                    st.rerun()
-                except Exception as e: st.error(f"Erro: {e}")
+            if st.button("⚙️ Gerar Rota Provisória", type="primary", use_container_width=True):
+                with st.spinner("Consultando GPS do Google..."):
+                    try:
+                        waypoints = [s['endereco'] for s in selecionados]
+                        res = gmaps.directions(partida, dest_final, waypoints=waypoints, optimize_waypoints=True)
+                        st.session_state.rota_provisoria = [selecionados[i] for i in res[0]['waypoint_order']]
+                        st.session_state.partida = partida
+                        st.session_state.etapa_rota = 1
+                        st.rerun()
+                    except Exception as e: st.error(f"Erro ao traçar rota: {e}")
 
         elif st.session_state.etapa_rota == 1:
-            st.subheader("📋 Ajuste a Sequência (⬆️ ⬇️)")
-            st.markdown("---")
-            for i, item in enumerate(st.session_state.rota_provisoria):
-                c1, c2, c3, c4 = st.columns([1, 1.5, 3, 4])
-                c1.markdown(f"### {i+1}º")
-                with c2:
-                    sc1, sc2 = st.columns(2)
-                    if sc1.button("⬆️", key=f"u_{i}", disabled=(i==0)):
-                        st.session_state.rota_provisoria[i], st.session_state.rota_provisoria[i-1] = st.session_state.rota_provisoria[i-1], st.session_state.rota_provisoria[i]
-                        st.rerun()
-                    if sc2.button("⬇️", key=f"d_{i}", disabled=(i==len(st.session_state.rota_provisoria)-1)):
-                        st.session_state.rota_provisoria[i], st.session_state.rota_provisoria[i+1] = st.session_state.rota_provisoria[i+1], st.session_state.rota_provisoria[i]
-                        st.rerun()
-                c3.markdown(f"**{'🚨 ' if item['urgente'] else ''}{item['nome']}**")
-                c4.caption(item['endereco'])
-                st.markdown("---")
+            st.subheader("📋 Etapa de Ajuste")
+            st.info("Utilize as setas para furar a fila se for necessário.")
             
-            if st.button("✅ Confirmar Rota Oficial", type="primary"):
+            for i, item in enumerate(st.session_state.rota_provisoria):
+                with st.container():
+                    c1, c2, c3 = st.columns([1, 6, 2])
+                    with c1:
+                        st.markdown(f"<h2>{i+1}º</h2>", unsafe_allow_html=True)
+                        sc1, sc2 = st.columns(2)
+                        if sc1.button("⬆️", key=f"u_{i}", disabled=(i==0)):
+                            st.session_state.rota_provisoria[i], st.session_state.rota_provisoria[i-1] = st.session_state.rota_provisoria[i-1], st.session_state.rota_provisoria[i]
+                            st.rerun()
+                        if sc2.button("⬇️", key=f"d_{i}", disabled=(i==len(st.session_state.rota_provisoria)-1)):
+                            st.session_state.rota_provisoria[i], st.session_state.rota_provisoria[i+1] = st.session_state.rota_provisoria[i+1], st.session_state.rota_provisoria[i]
+                            st.rerun()
+                    with c2:
+                        st.markdown(f"**{'🚨 URGENTE: ' if item['urgente'] else ''}{item['nome']}**")
+                        st.write(f"*{item['endereco']}*")
+                        if item['obs']:
+                            st.caption(f"📝 Obs: {item['obs']}")
+                    with c3:
+                        st.markdown(f"**Tarefa:**<br>{item['missao']}", unsafe_allow_html=True)
+                st.divider()
+            
+            if st.button("✅ Confirmar Rota Oficial", type="primary", use_container_width=True):
                 st.session_state.rota_final = st.session_state.rota_provisoria
                 st.session_state.etapa_rota = 2
                 st.rerun()
@@ -218,96 +270,240 @@ elif aba == "🚚 Gerar Intinerário":
                 res = gmaps.directions(partida, dest_final, waypoints=[s['endereco'] for s in rota], optimize_waypoints=False)
                 dist = f"{round(sum(l['distance']['value'] for l in res[0]['legs'])/1000, 1)} km"
                 
-                st.success(f"Oficializado: {dist}")
-                st.link_button("📱 Abrir GPS", f"https://www.google.com/maps/dir/{urllib.parse.quote(partida)}/" + "/".join([urllib.parse.quote(s['endereco']) for s in rota]) + f"/{urllib.parse.quote(dest_final)}")
+                st.success(f"🏁 Rota Oficializada com Sucesso! Distância total: {dist}")
+                st.link_button("📱 ABRIR ROTA NO GPS DO MOTOBOY", f"https://www.google.com/maps/dir/{urllib.parse.quote(partida)}/" + "/".join([urllib.parse.quote(s['endereco']) for s in rota]) + f"/{urllib.parse.quote(dest_final)}", use_container_width=True)
 
                 st.subheader("📋 Relatório da Rota Oficial")
+                
+                # HTML DE IMPRESSÃO (Agora inclui Observações com codificação perfeita)
                 fuso = pytz.timezone('America/Fortaleza')
                 agora = datetime.now(fuso)
                 
-                # HTML para Impressão Económica (com codificação correta)
-                html_imp = f"""<div style='font-family:Arial; font-size:12px;'>
-                <h2>INTINERÁRIO OFICIAL - {agora.strftime('%d/%m/%Y')}</h2>
-                <p><strong>Partida:</strong> {partida}<br><strong>KM Total:</strong> {dist}</p><hr>"""
+                html_imp = f"""<div style='font-family: Arial, sans-serif; font-size:16px; color:#000;'>
+                <h2 style='border-bottom: 2px solid #000; padding-bottom:10px;'>ITINERÁRIO OFICIAL</h2>
+                <p><strong>Data:</strong> {agora.strftime('%d/%m/%Y às %H:%M')}<br>
+                <strong>Partida:</strong> {partida}<br>
+                <strong>KM Total Estimado:</strong> {dist}</p>
+                <hr style='border:1px solid #000;'>
+                """
                 
+                obs_banco = [] # Compila observações para salvar na planilha
+
                 for i, item in enumerate(rota):
-                    st.write(f"**{i+1}º - {item['nome']}** {'🚨 URGENTE' if item['urgente'] else ''}")
-                    st.write(f"🎯 {item['missao']} | 📍 {item['endereco']}")
+                    st.write(f"### {i+1}º - {item['nome']} {'🚨' if item['urgente'] else ''}")
+                    st.write(f"**Tarefa:** {item['missao']} | **Endereço:** {item['endereco']}")
+                    if item['obs']:
+                        st.info(f"**Observação:** {item['obs']}")
+                        obs_banco.append(f"[{item['nome']}] {item['obs']}")
                     st.divider()
-                    html_imp += f"<p><strong>{i+1}º - {item['nome']}</strong> {'(URGENTE)' if item['urgente'] else ''}<br>Tarefa: {item['missao']}<br>Endereço: {item['endereco']}</p><hr>"
+                    
+                    # Montagem para o Papel (Impressão)
+                    html_imp += f"""<p style='margin-bottom:15px; line-height:1.5;'>
+                    <strong>{i+1}º - {item['nome']}</strong> {'<strong style="color:red;">(URGENTE)</strong>' if item['urgente'] else ''}<br>
+                    <strong>Tarefa:</strong> {item['missao']}<br>
+                    <strong>Endereço:</strong> {item['endereco']}"""
+                    
+                    if item['obs']:
+                        html_imp += f"<br><strong>Observação:</strong> <em>{item['obs']}</em>"
+                    html_imp += "</p><hr style='border-top:1px dashed #ccc;'>"
                 
-                html_imp += "</div>"
+                html_imp += f"<p><strong>Destino Final:</strong> Sede da Administradora ({dest_final})</p></div>"
+                
+                # O encode utf-8 evita quebras de acentuação na impressão web
                 b64 = base64.b64encode(html_imp.encode('utf-8')).decode('utf-8')
 
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("🔄 Planejar Nova Rota", use_container_width=True):
+                col_n, col_i = st.columns(2)
+                with col_n:
+                    if st.button("🔄 Elaborar Nova Rota", use_container_width=True):
                         st.session_state.etapa_rota = 0
                         st.session_state.historico_salvo = False
                         st.rerun()
-                with col2:
-                    components.html(f"""<script>function imp(){{const h=decodeURIComponent(escape(window.atob('{b64}')));const i=document.createElement('iframe');i.style.display='none';document.body.appendChild(i);i.contentWindow.document.write(h);i.contentWindow.document.close();i.contentWindow.print();}}</script><button style='width:100%; height:45px; border-radius:8px; border:1px solid #ccc; cursor:pointer' onclick='imp()'>🖨️ Imprimir Relatório</button>""", height=50)
+                with col_i:
+                    # Injeta o botão que aciona a janela de impressão do navegador
+                    components.html(f"""
+                        <script>
+                        function imp(){{
+                            const h=decodeURIComponent(escape(window.atob('{b64}')));
+                            const i=document.createElement('iframe');
+                            i.style.display='none';
+                            document.body.appendChild(i);
+                            i.contentWindow.document.open();
+                            i.contentWindow.document.write(h);
+                            i.contentWindow.document.close();
+                            setTimeout(()=>{{i.contentWindow.print();}}, 500);
+                        }}
+                        </script>
+                        <button style='width:100%; height:42px; background-color:#ffffff; color:#31333f; font-weight:bold; border-radius:8px; border:1px solid #ccc; cursor:pointer;' onclick='imp()'>🖨️ IMPRIMIR ESTE RELATÓRIO</button>
+                    """, height=50)
 
+                # Salvar Histórico (Agora com 6 colunas, incluindo Observações)
                 if not st.session_state.historico_salvo:
-                    aba_historico.append_row([agora.strftime("%d/%m/%Y"), agora.strftime("%H:%M"), partida, " ➔ ".join([f"🚨 {s['nome']}" if s['urgente'] else s['nome'] for s in rota]), dist])
+                    str_obs_finais = " | ".join(obs_banco) if obs_banco else ""
+                    linha_historico = [
+                        agora.strftime("%d/%m/%Y"), 
+                        agora.strftime("%H:%M"), 
+                        partida, 
+                        " ➔ ".join([f"🚨 {s['nome']}" if s['urgente'] else s['nome'] for s in rota]), 
+                        dist,
+                        str_obs_finais # NOVA COLUNA F
+                    ]
+                    aba_historico.append_row(linha_historico)
                     buscar_historico.clear()
                     st.session_state.historico_salvo = True
-            except Exception as e: st.error(f"Erro: {e}")
+                    
+            except Exception as e: st.error(f"Erro no fechamento da rota: {e}")
 
-# --- RELATÓRIO DE ROTAS ---
+# ==========================================================
+# 📊 RELATÓRIOS DE ROTAS
+# ==========================================================
 elif aba == "📊 Relatórios de Rotas":
-    st.header("Histórico e Gestão de Rotas")
+    st.header("Gestão de Rotas Geradas")
     dados = buscar_historico()
     if not dados: st.info("Nenhuma rota registada.")
     else:
         df = pd.DataFrame(dados)
-        t1, t2, t3 = st.tabs(["📋 Histórico Geral", "📈 Relatório Agrupado", "⚙️ Detalhar e Editar"])
+        
+        # Garante que a coluna de observações não quebre o sistema se os dados antigos não a tiverem
+        if 'OBSERVAÇÕES' not in df.columns:
+            df['OBSERVAÇÕES'] = ""
+            
+        t1, t2, t3 = st.tabs(["📋 Histórico Completo", "📈 Somatória e Agrupamentos", "⚙️ Detalhar, Editar e Imprimir"])
         
         with t1:
+            st.markdown("### Visualização Geral")
             datas = df['DATA'].unique().tolist()[::-1]
-            sel_data = st.selectbox("Filtrar Data:", ["Todas"] + datas)
-            df_v = df if sel_data == "Todas" else df[df['DATA'] == sel_data]
+            sel_data = st.selectbox("Filtrar Tabela por Data:", ["Todas as Datas"] + datas)
+            df_v = df if sel_data == "Todas as Datas" else df[df['DATA'] == sel_data]
             st.dataframe(df_v, hide_index=True, use_container_width=True)
             
         with t2:
-            st.caption("Selecione as rotas para somatória de KM:")
+            st.markdown("### Cálculos por Seleção")
+            st.caption("Marque as caixas das rotas que deseja somar.")
             df_sel = df.copy()
             df_sel.insert(0, "SELECIONAR", False)
-            edit = st.data_editor(df_sel, hide_index=True, use_container_width=True)
+            edit = st.data_editor(df_sel, hide_index=True, use_container_width=True, disabled=["DATA", "HORA", "PARTIDA", "ROTA", "KM TOTAL", "OBSERVAÇÕES"])
             selecionadas = edit[edit["SELECIONAR"]]
             if not selecionadas.empty:
-                total_km = sum([float(str(k).replace('km','').replace(',','.').strip()) for k in selecionadas["KM TOTAL"]])
-                st.metric("Distância Total", f"{total_km:.1f} km")
+                total_km = sum([float(str(k).replace('km','').replace(',','.').strip()) for k in selecionadas["KM TOTAL"] if k])
+                st.metric("📏 Distância Total do Período Selecionado", f"{total_km:.1f} km")
         
         with t3:
-            busca = st.text_input("Buscar por Local ou Data:").lower()
-            opcoes = [f"{r['DATA']} - {r['ROTA'][:50]}..." for i, r in df.iterrows() if busca in str(r).lower()]
+            st.markdown("### Ferramentas Individuais da Rota")
+            st.info("Selecione uma rota específica abaixo para visualizar detalhes, adicionar complementos ou imprimir a folha do percurso.")
+            
+            busca = st.text_input("🔍 Buscar por Local, Condomínio ou Data:").lower()
+            opcoes = []
+            for i, r in df.iterrows():
+                # Formata um resumo legível para a caixa de seleção
+                resumo = f"Data: {r.get('DATA','')} | {r.get('KM TOTAL','')} | Locais: {str(r.get('ROTA',''))[:50]}..."
+                if busca in str(r.to_dict()).lower():
+                    opcoes.append((i, resumo, r))
+            
+            # Mostra do mais recente para o mais antigo
+            opcoes.reverse()
+            
             if opcoes:
-                sel_edit = st.selectbox("Escolha a rota:", opcoes)
-                if st.button("🗑️ Excluir Rota"):
-                    idx_del = opcoes.index(sel_edit) + 2
-                    aba_historico.delete_rows(idx_del)
-                    buscar_historico.clear()
-                    st.rerun()
+                sel = st.selectbox("Selecione a rota desejada:", opcoes, format_func=lambda x: x[1])
+                idx_df, resumo, row_dados = sel
+                
+                # O índice real do Google Sheets é o index do DataFrame + 2 (por causa do cabeçalho)
+                idx_sheets = idx_df + 2 
+                
+                st.divider()
+                st.markdown("#### Detalhamento e Edição")
+                
+                with st.form("form_editar_historico"):
+                    c1, c2, c3 = st.columns([1, 1, 1])
+                    n_data = c1.text_input("Data", value=str(row_dados.get('DATA', '')))
+                    n_hora = c2.text_input("Hora", value=str(row_dados.get('HORA', '')))
+                    n_km = c3.text_input("KM Total", value=str(row_dados.get('KM TOTAL', '')))
+                    
+                    n_partida = st.text_input("Partida", value=str(row_dados.get('PARTIDA', '')))
+                    n_rota = st.text_area("Rota (Locais separados por ' ➔ ')", value=str(row_dados.get('ROTA', '')))
+                    
+                    # O novo campo de observações!
+                    n_obs = st.text_area("Observações / Complementos", value=str(row_dados.get('OBSERVAÇÕES', '')), help="Adicione recados ou atualize o status dos locais.")
+                    
+                    col_s, col_d = st.columns(2)
+                    with col_s:
+                        if st.form_submit_button("💾 Salvar Alterações na Rota", type="primary", use_container_width=True):
+                            try:
+                                # Atualiza da Coluna A (Data) até F (Observações)
+                                aba_historico.update(f"A{idx_sheets}:F{idx_sheets}", [[n_data, n_hora, n_partida, n_rota, n_km, n_obs]])
+                                buscar_historico.clear()
+                                st.success("Atualizado com sucesso!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Erro ao salvar: {e}")
+                    with col_d:
+                        if st.form_submit_button("🗑️ Excluir Rota", use_container_width=True):
+                            aba_historico.delete_rows(idx_sheets)
+                            buscar_historico.clear()
+                            st.rerun()
+                
+                st.markdown("#### Impressão Rápida")
+                # Prepara o HTML de impressão desta rota salva, recriando o layout bonito
+                lista_locais = str(n_rota).split(" ➔ ")
+                html_imp_hist = f"""<div style='font-family: Arial, sans-serif; font-size:16px; color:#000;'>
+                <h2 style='border-bottom: 2px solid #000; padding-bottom:10px;'>ITINERÁRIO (REIMPRESSÃO)</h2>
+                <p><strong>Data de Referência:</strong> {n_data} às {n_hora}<br>
+                <strong>Partida:</strong> {n_partida}<br>
+                <strong>KM Total:</strong> {n_km}</p>
+                <hr style='border:1px solid #000;'>
+                """
+                
+                for idx_loc, loc in enumerate(lista_locais):
+                    urg = "(URGENTE)" if "🚨" in loc else ""
+                    nome_limpo = loc.replace("🚨 ", "")
+                    html_imp_hist += f"<p style='margin-bottom:10px; line-height:1.5;'><strong>{idx_loc+1}º - {nome_limpo}</strong> <strong style='color:red;'>{urg}</strong></p>"
+                
+                if n_obs:
+                    html_imp_hist += f"<hr><p><strong>OBSERVAÇÕES DA ROTA:</strong><br>{n_obs}</p>"
+                
+                html_imp_hist += "</div>"
+                b64_hist = base64.b64encode(html_imp_hist.encode('utf-8')).decode('utf-8')
+                
+                components.html(f"""
+                    <script>
+                    function imp(){{
+                        const h=decodeURIComponent(escape(window.atob('{b64_hist}')));
+                        const i=document.createElement('iframe');
+                        i.style.display='none';
+                        document.body.appendChild(i);
+                        i.contentWindow.document.open();
+                        i.contentWindow.document.write(h);
+                        i.contentWindow.document.close();
+                        setTimeout(()=>{{i.contentWindow.print();}}, 500);
+                    }}
+                    </script>
+                    <button style='width:100%; height:45px; background-color:#ffffff; color:#31333f; font-weight:bold; border-radius:8px; border:1px solid #ccc; cursor:pointer;' onclick='imp()'>🖨️ IMPRIMIR ESTA ROTA</button>
+                """, height=50)
 
-# --- DADOS DO VEÍCULO ---
+# ==========================================================
+# 🏍️ DADOS DO VEÍCULO E RELATÓRIOS
+# ==========================================================
 elif aba == "🏍️ Dados do Veículo":
-    st.header("Registo Diário")
+    st.header("Registo Diário da Frota")
+    st.info("Preencha ao final do dia o uso e os gastos.")
     with st.form("veiculo"):
         c1, c2 = st.columns(2)
-        d = c1.date_input("Data", format="DD/MM/YYYY")
-        km = c2.number_input("KM Inicial", min_value=0)
-        abast = st.checkbox("Houve abastecimento?")
-        v = st.number_input("Valor (R$)", min_value=0.0)
-        if st.form_submit_button("Salvar"):
+        d = c1.date_input("Data do Registo", format="DD/MM/YYYY")
+        km = c2.number_input("Odómetro (KM no painel)", min_value=0)
+        
+        st.write("---")
+        abast = st.checkbox("Houve abastecimento neste dia?")
+        v = st.number_input("Valor total do abastecimento (R$)", min_value=0.0, format="%.2f")
+        
+        if st.form_submit_button("💾 Salvar Dados do Veículo", type="primary"):
             aba_veiculo.append_row([d.strftime("%d/%m/%Y"), km, "SIM" if abast else "NÃO", v])
             buscar_veiculo.clear()
-            st.success("Gravado!")
+            st.success("Dados da frota gravados com sucesso!")
 
-# --- RELATÓRIO DE VEÍCULOS ---
 elif aba == "📑 Relatório de Veículos":
-    st.header("Gestão de Frota e Custos")
-    periodo = st.date_input("Selecione o Período:", [])
+    st.header("Gestão Financeira e de Rodagem")
+    st.markdown("### Cruzamento de Custos e Distância")
+    periodo = st.date_input("Selecione o Período (Início e Fim):", [])
+    
     if len(periodo) == 2:
         inicio, fim = periodo
         dados_v = buscar_veiculo()
@@ -315,5 +511,15 @@ elif aba == "📑 Relatório de Veículos":
             df_v = pd.DataFrame(dados_v)
             df_v['dt'] = pd.to_datetime(df_v['DATA'], format='%d/%m/%Y').dt.date
             filtrado = df_v[(df_v['dt'] >= inicio) & (df_v['dt'] <= fim)]
-            st.metric("Gasto em Combustível", f"R$ {sum(pd.to_numeric(filtrado['VALOR'])):.2f}")
+            
+            c1, c2 = st.columns(2)
+            gasto_total = sum(pd.to_numeric(filtrado['VALOR']))
+            c1.metric("⛽ Gasto em Combustível no Período", f"R$ {gasto_total:.2f}")
+            c2.metric("🗓️ Dias Registados", len(filtrado))
+            
+            st.markdown("#### Tabela de Abastecimentos Diários")
             st.dataframe(filtrado.drop(columns=['dt']), hide_index=True, use_container_width=True)
+        else:
+            st.warning("Não há informações de veículo para exibir neste período.")
+    else:
+        st.info("Selecione uma data inicial e uma data final no calendário acima para carregar o relatório.")
