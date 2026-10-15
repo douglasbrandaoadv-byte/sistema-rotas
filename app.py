@@ -9,7 +9,7 @@ import pytz
 import streamlit.components.v1 as components
 import base64
 
-# Configuração de ecrã para ocupar toda a largura (melhora a visualização)
+# Configuração de ecrã para ocupar toda a largura
 st.set_page_config(page_title="Rota Inteligente - Renove", layout="wide")
 
 # --- CONEXÃO OFICIAL GOOGLE ---
@@ -81,7 +81,7 @@ if not st.session_state.logado:
     st.stop()
 
 # ==========================================================
-# NOVO MENU LATERAL (FOCO EM ACESSIBILIDADE)
+# MENU LATERAL (FOCO EM ACESSIBILIDADE)
 # ==========================================================
 if 'menu_atual' not in st.session_state:
     st.session_state.menu_atual = "📍 Gestão de Locais"
@@ -89,7 +89,6 @@ if 'menu_atual' not in st.session_state:
 st.sidebar.success("✅ Sistema Online e Conectado")
 st.sidebar.markdown("### 🧭 MENU DE NAVEGAÇÃO")
 
-# Botões grandes e clicáveis para facilitar a visão
 opcoes_menu = [
     "📍 Gestão de Locais", 
     "🚚 Gerar Intinerário", 
@@ -99,16 +98,18 @@ opcoes_menu = [
 ]
 
 for opcao in opcoes_menu:
-    # Destaca o botão da aba atual
     tipo_botao = "primary" if st.session_state.menu_atual == opcao else "secondary"
     if st.sidebar.button(opcao, use_container_width=True, type=tipo_botao):
         st.session_state.menu_atual = opcao
         st.rerun()
 
 st.sidebar.markdown("---")
-if st.sidebar.button("🚪 Terminar Sessão", use_container_width=True):
+if st.sidebar.button("🚪 Terminar Sessão (Limpar Cache)", use_container_width=True):
     st.session_state.logado = False
     st.query_params.clear()
+    buscar_dados.clear()
+    buscar_historico.clear()
+    buscar_veiculo.clear()
     st.rerun()
 
 aba = st.session_state.menu_atual
@@ -287,7 +288,7 @@ elif aba == "🚚 Gerar Intinerário":
                 <hr style='border:1px solid #000;'>
                 """
                 
-                obs_banco = [] # Compila observações para salvar na planilha
+                obs_banco = []
 
                 for i, item in enumerate(rota):
                     st.write(f"### {i+1}º - {item['nome']} {'🚨' if item['urgente'] else ''}")
@@ -297,7 +298,6 @@ elif aba == "🚚 Gerar Intinerário":
                         obs_banco.append(f"[{item['nome']}] {item['obs']}")
                     st.divider()
                     
-                    # Montagem para o Papel (Impressão)
                     html_imp += f"""<p style='margin-bottom:15px; line-height:1.5;'>
                     <strong>{i+1}º - {item['nome']}</strong> {'<strong style="color:red;">(URGENTE)</strong>' if item['urgente'] else ''}<br>
                     <strong>Tarefa:</strong> {item['missao']}<br>
@@ -309,7 +309,6 @@ elif aba == "🚚 Gerar Intinerário":
                 
                 html_imp += f"<p><strong>Destino Final:</strong> Sede da Administradora ({dest_final})</p></div>"
                 
-                # O encode utf-8 evita quebras de acentuação na impressão web
                 b64 = base64.b64encode(html_imp.encode('utf-8')).decode('utf-8')
 
                 col_n, col_i = st.columns(2)
@@ -319,7 +318,6 @@ elif aba == "🚚 Gerar Intinerário":
                         st.session_state.historico_salvo = False
                         st.rerun()
                 with col_i:
-                    # Injeta o botão que aciona a janela de impressão do navegador
                     components.html(f"""
                         <script>
                         function imp(){{
@@ -336,7 +334,6 @@ elif aba == "🚚 Gerar Intinerário":
                         <button style='width:100%; height:42px; background-color:#ffffff; color:#31333f; font-weight:bold; border-radius:8px; border:1px solid #ccc; cursor:pointer;' onclick='imp()'>🖨️ IMPRIMIR ESTE RELATÓRIO</button>
                     """, height=50)
 
-                # Salvar Histórico (Agora com 6 colunas, incluindo Observações)
                 if not st.session_state.historico_salvo:
                     str_obs_finais = " | ".join(obs_banco) if obs_banco else ""
                     linha_historico = [
@@ -345,7 +342,7 @@ elif aba == "🚚 Gerar Intinerário":
                         partida, 
                         " ➔ ".join([f"🚨 {s['nome']}" if s['urgente'] else s['nome'] for s in rota]), 
                         dist,
-                        str_obs_finais # NOVA COLUNA F
+                        str_obs_finais 
                     ]
                     aba_historico.append_row(linha_historico)
                     buscar_historico.clear()
@@ -359,11 +356,13 @@ elif aba == "🚚 Gerar Intinerário":
 elif aba == "📊 Relatórios de Rotas":
     st.header("Gestão de Rotas Geradas")
     dados = buscar_historico()
-    if not dados: st.info("Nenhuma rota registada.")
+    
+    # Proteção de contagem len() == 0 previne o erro "Truth value of a DataFrame is ambiguous"
+    if len(dados) == 0: 
+        st.info("Nenhuma rota registada.")
     else:
         df = pd.DataFrame(dados)
         
-        # Garante que a coluna de observações não quebre o sistema se os dados antigos não a tiverem
         if 'OBSERVAÇÕES' not in df.columns:
             df['OBSERVAÇÕES'] = ""
             
@@ -382,7 +381,9 @@ elif aba == "📊 Relatórios de Rotas":
             df_sel = df.copy()
             df_sel.insert(0, "SELECIONAR", False)
             edit = st.data_editor(df_sel, hide_index=True, use_container_width=True, disabled=["DATA", "HORA", "PARTIDA", "ROTA", "KM TOTAL", "OBSERVAÇÕES"])
-            selecionadas = edit[edit["SELECIONAR"]]
+            
+            # Verificação segura de booleanos previne o erro de DataFrame
+            selecionadas = edit[edit["SELECIONAR"] == True]
             if not selecionadas.empty:
                 total_km = sum([float(str(k).replace('km','').replace(',','.').strip()) for k in selecionadas["KM TOTAL"] if k])
                 st.metric("📏 Distância Total do Período Selecionado", f"{total_km:.1f} km")
@@ -394,19 +395,16 @@ elif aba == "📊 Relatórios de Rotas":
             busca = st.text_input("🔍 Buscar por Local, Condomínio ou Data:").lower()
             opcoes = []
             for i, r in df.iterrows():
-                # Formata um resumo legível para a caixa de seleção
                 resumo = f"Data: {r.get('DATA','')} | {r.get('KM TOTAL','')} | Locais: {str(r.get('ROTA',''))[:50]}..."
                 if busca in str(r.to_dict()).lower():
                     opcoes.append((i, resumo, r))
             
-            # Mostra do mais recente para o mais antigo
             opcoes.reverse()
             
             if opcoes:
                 sel = st.selectbox("Selecione a rota desejada:", opcoes, format_func=lambda x: x[1])
                 idx_df, resumo, row_dados = sel
                 
-                # O índice real do Google Sheets é o index do DataFrame + 2 (por causa do cabeçalho)
                 idx_sheets = idx_df + 2 
                 
                 st.divider()
@@ -420,15 +418,12 @@ elif aba == "📊 Relatórios de Rotas":
                     
                     n_partida = st.text_input("Partida", value=str(row_dados.get('PARTIDA', '')))
                     n_rota = st.text_area("Rota (Locais separados por ' ➔ ')", value=str(row_dados.get('ROTA', '')))
-                    
-                    # O novo campo de observações!
                     n_obs = st.text_area("Observações / Complementos", value=str(row_dados.get('OBSERVAÇÕES', '')), help="Adicione recados ou atualize o status dos locais.")
                     
                     col_s, col_d = st.columns(2)
                     with col_s:
                         if st.form_submit_button("💾 Salvar Alterações na Rota", type="primary", use_container_width=True):
                             try:
-                                # Atualiza da Coluna A (Data) até F (Observações)
                                 aba_historico.update(f"A{idx_sheets}:F{idx_sheets}", [[n_data, n_hora, n_partida, n_rota, n_km, n_obs]])
                                 buscar_historico.clear()
                                 st.success("Atualizado com sucesso!")
@@ -442,7 +437,6 @@ elif aba == "📊 Relatórios de Rotas":
                             st.rerun()
                 
                 st.markdown("#### Impressão Rápida")
-                # Prepara o HTML de impressão desta rota salva, recriando o layout bonito
                 lista_locais = str(n_rota).split(" ➔ ")
                 html_imp_hist = f"""<div style='font-family: Arial, sans-serif; font-size:16px; color:#000;'>
                 <h2 style='border-bottom: 2px solid #000; padding-bottom:10px;'>ITINERÁRIO (REIMPRESSÃO)</h2>
@@ -507,7 +501,9 @@ elif aba == "📑 Relatório de Veículos":
     if len(periodo) == 2:
         inicio, fim = periodo
         dados_v = buscar_veiculo()
-        if dados_v:
+        
+        # Proteção extra len() para prevenir o erro de Pandas
+        if len(dados_v) > 0:
             df_v = pd.DataFrame(dados_v)
             df_v['dt'] = pd.to_datetime(df_v['DATA'], format='%d/%m/%Y').dt.date
             filtrado = df_v[(df_v['dt'] >= inicio) & (df_v['dt'] <= fim)]
