@@ -1,3 +1,23 @@
+As quatro solicitações foram implementadas diretamente na estrutura do sistema:
+
+1. **Nova Tarefa ("PONTO DE PRESENÇA"):** Adicionada à lista suspensa do campo "Tarefa" na tela de criação de diligências.
+
+
+2. **Ponto de Partida Fixo:** O campo "Ponto de Partida" passa a vir preenchido por padrão com **`Rua Rodrigues de Aquino, 267, Centro, CEP 58013030, João Pessoa/PB`**, sendo utilizado automaticamente como origem no cálculo de todas as rotas.
+
+
+3. **Botão de Voltar na Etapa de Ajuste:** Adicionado o botão **"⬅️ Voltar para Etapa Anterior"** ao lado do botão de confirmação na tela de ajuste de sequência, mantendo na memória os locais, tarefas e observações já digitados para que você não precise preencher tudo novamente.
+
+
+4. **Impressão das Rotas na Íntegra ("Gestão de Rotas Geradas"):** O relatório impresso na aba de seleção múltipla agora exibe, além do resumo de quilometragem e do ranking de visitas, o **detalhamento completo na íntegra de cada uma das rotas (datas) selecionadas** (com data, horário, endereço de partida, quilometragem individual, sequência numerada de todas as paradas e observações registradas).
+
+---
+
+### Código Completo Atualizado (`app.py`)
+
+Substitua todo o conteúdo do arquivo **`app.py`** no seu GitHub pelo código abaixo:
+
+```python
 import streamlit as st
 import pandas as pd
 import gspread
@@ -16,6 +36,7 @@ st.set_page_config(page_title="Rota Inteligente - Renove", layout="wide", page_i
 # ==========================================================
 COR_ESCURA = "#313753"  
 COR_CLARA = "#4D648D"   
+ENDERECO_SEDE = "Rua Rodrigues de Aquino, 267, Centro, CEP 58013030, João Pessoa/PB"
 
 st.markdown(f"""
 <style>
@@ -63,7 +84,7 @@ except Exception as e:
     st.error(f"⚠️ Erro ao aceder ao sistema do Google: {e}")
     st.stop()
 
-# --- SISTEMA DE CACHE SEGURO (USANDO LISTAS E DICIONÁRIOS PUROS) ---
+# --- SISTEMA DE CACHE SEGURO ---
 @st.cache_data(ttl=600, show_spinner=False)
 def buscar_dados():
     try:
@@ -89,7 +110,6 @@ def buscar_historico():
             return []
         
         cabecalho = [str(c).strip().upper() for c in valores[0]]
-        # Garante que a 6ª coluna (OBSERVAÇÕES) exista automaticamente
         if len(cabecalho) < 6:
             try:
                 aba_historico.update_acell("F1", "OBSERVAÇÕES")
@@ -106,7 +126,6 @@ def buscar_historico():
 
         lista_registos = []
         for linha in valores[1:]:
-            # Preenche colunas vazias caso a linha tenha menos de 6 itens
             linha_completa = list(linha) + [""] * (6 - len(linha))
             registo = {
                 "DATA": str(linha_completa[0]).strip(),
@@ -288,22 +307,41 @@ elif aba == "🚚 Gerar Intinerário":
             st.session_state.etapa_rota = 0
             st.session_state.rota_provisoria = []
             st.session_state.historico_salvo = False
+        if 'rascunho_diligencias' not in st.session_state:
+            st.session_state.rascunho_diligencias = []
 
         lista_nomes_locais = df_locais['NOME'].astype(str).unique().tolist()
+        opcoes_tarefas = [
+            "ENTREGA DE BOLETOS", 
+            "NOTIFICAÇÃO", 
+            "RECOLHER ATAS", 
+            "DOCUMENTOS", 
+            "FOLHA DE PAGAMENTO", 
+            "PONTO DE PRESENÇA"
+        ]
 
         if st.session_state.etapa_rota == 0:
-            qtd = st.number_input("Número de diligências hoje:", min_value=1, step=1)
+            qtd_inicial = len(st.session_state.rascunho_diligencias) if len(st.session_state.rascunho_diligencias) > 0 else 1
+            qtd = st.number_input("Número de diligências hoje:", min_value=1, value=qtd_inicial, step=1)
             selecionados = []
+            
             for i in range(int(qtd)):
+                # Recupera valores preenchidos anteriormente caso o operador tenha clicado em "Voltar"
+                rascunho = st.session_state.rascunho_diligencias[i] if i < len(st.session_state.rascunho_diligencias) else {}
+                idx_local_padrao = lista_nomes_locais.index(rascunho["nome"]) if rascunho.get("nome") in lista_nomes_locais else 0
+                idx_tarefa_padrao = opcoes_tarefas.index(rascunho["missao"]) if rascunho.get("missao") in opcoes_tarefas else 0
+                obs_padrao = rascunho.get("obs", "")
+                urg_padrao = rascunho.get("urgente", False)
+
                 st.markdown(f"<h3 style='color:{COR_CLARA};'>Diligência {i+1}</h3>", unsafe_allow_html=True)
                 c1, c2 = st.columns(2)
-                n_sel = c1.selectbox("Selecione o Local", lista_nomes_locais, key=f"l_{i}")
-                m_sel = c2.selectbox("Tarefa", ["ENTREGA DE BOLETOS", "NOTIFICAÇÃO", "RECOLHER ATAS", "DOCUMENTOS", "FOLHA DE PAGAMENTO"], key=f"m_{i}")
+                n_sel = c1.selectbox("Selecione o Local", lista_nomes_locais, index=idx_local_padrao, key=f"l_{i}")
+                m_sel = c2.selectbox("Tarefa", opcoes_tarefas, index=idx_tarefa_padrao, key=f"m_{i}")
                 
                 c3, c4 = st.columns([3, 1])
-                obs = c3.text_input("Observações (Ex: Falar com portaria)", key=f"o_{i}")
+                obs = c3.text_input("Observações (Ex: Falar com portaria)", value=obs_padrao, key=f"o_{i}")
                 st.write("") 
-                urg = c4.checkbox("🚨 MARCAR COMO URGENTE", key=f"u_{i}")
+                urg = c4.checkbox("🚨 MARCAR COMO URGENTE", value=urg_padrao, key=f"u_{i}")
                 
                 r = df_locais.loc[df_locais['NOME'].astype(str) == str(n_sel)].iloc[0].to_dict()
                 end = f"{r.get('RUA','')}, {r.get('NUMERO','')}, {r.get('BAIRRO','')}, {r.get('CIDADE','')}, {r.get('ESTADO','')}"
@@ -311,12 +349,13 @@ elif aba == "🚚 Gerar Intinerário":
                 st.divider()
 
             st.markdown("### Partida e Geração")
-            partida = st.text_input("Ponto de Partida:", value="João Pessoa, PB")
-            dest_final = "Rua Rodrigues de Aquino, 267, Centro, João Pessoa, PB"
+            partida = st.text_input("Ponto de Partida:", value=ENDERECO_SEDE)
+            dest_final = ENDERECO_SEDE
 
             if st.button("⚙️ Gerar Rota Provisória", type="primary", use_container_width=True):
                 with st.spinner("Consultando GPS do Google..."):
                     try:
+                        st.session_state.rascunho_diligencias = selecionados
                         waypoints = [s['endereco'] for s in selecionados]
                         res = gmaps.directions(partida, dest_final, waypoints=waypoints, optimize_waypoints=True)
                         st.session_state.rota_provisoria = [selecionados[i] for i in res[0]['waypoint_order']]
@@ -351,16 +390,22 @@ elif aba == "🚚 Gerar Intinerário":
                         st.markdown(f"**Tarefa:**<br>{item['missao']}", unsafe_allow_html=True)
                 st.divider()
             
-            if st.button("✅ Confirmar Rota Oficial", type="primary", use_container_width=True):
-                st.session_state.rota_final = st.session_state.rota_provisoria
-                st.session_state.etapa_rota = 2
-                st.rerun()
+            col_voltar, col_confirmar = st.columns(2)
+            with col_voltar:
+                if st.button("⬅️ Voltar para Etapa Anterior", use_container_width=True):
+                    st.session_state.etapa_rota = 0
+                    st.rerun()
+            with col_confirmar:
+                if st.button("✅ Confirmar Rota Oficial", type="primary", use_container_width=True):
+                    st.session_state.rota_final = st.session_state.rota_provisoria
+                    st.session_state.etapa_rota = 2
+                    st.rerun()
 
         elif st.session_state.etapa_rota == 2:
             try:
                 rota = st.session_state.rota_final
                 partida = st.session_state.partida
-                dest_final = "Rua Rodrigues de Aquino, 267, Centro, João Pessoa, PB"
+                dest_final = ENDERECO_SEDE
                 res = gmaps.directions(partida, dest_final, waypoints=[s['endereco'] for s in rota], optimize_waypoints=False)
                 dist = f"{round(sum(l['distance']['value'] for l in res[0]['legs'])/1000, 1)} km"
                 
@@ -387,7 +432,9 @@ elif aba == "🚚 Gerar Intinerário":
                     st.write(f"**Tarefa:** {item['missao']} | **Endereço:** {item['endereco']}")
                     if item['obs']:
                         st.info(f"**Observação:** {item['obs']}")
-                        obs_banco.append(f"[{item['nome']}] {item['obs']}")
+                        obs_banco.append(f"[{item['nome']}] ({item['missao']}) {item['obs']}")
+                    else:
+                        obs_banco.append(f"[{item['nome']}] ({item['missao']})")
                     st.divider()
                     
                     html_imp += f"""<p style='margin-bottom:15px; line-height:1.5;'>
@@ -405,6 +452,7 @@ elif aba == "🚚 Gerar Intinerário":
                 with col_n:
                     if st.button("🔄 Elaborar Nova Rota", use_container_width=True):
                         st.session_state.etapa_rota = 0
+                        st.session_state.rascunho_diligencias = []
                         st.session_state.historico_salvo = False
                         st.rerun()
                 with col_i:
@@ -426,11 +474,13 @@ elif aba == "🚚 Gerar Intinerário":
 
                 if not st.session_state.historico_salvo:
                     str_obs_finais = " | ".join(obs_banco) if obs_banco else ""
+                    nomes_rota_hist = [f"🚨 {s['nome']}" if s['urgente'] else s['nome'] for s in rota]
+                    nomes_rota_hist.append("Sede Renove")
                     linha_historico = [
                         agora.strftime("%d/%m/%Y"), 
                         agora.strftime("%H:%M"), 
                         partida, 
-                        " ➔ ".join([f"🚨 {s['nome']}" if s['urgente'] else s['nome'] for s in rota]), 
+                        " ➔ ".join(nomes_rota_hist), 
                         dist,
                         str_obs_finais 
                     ]
@@ -442,12 +492,21 @@ elif aba == "🚚 Gerar Intinerário":
                 st.error(f"Erro no fechamento da rota: {e}")
 
 # ==========================================================
-# 📊 RELATÓRIOS DE ROTAS (100% LIVRE DE OBJETOS SERIES EM WIDGETS)
+# 📊 RELATÓRIOS DE ROTAS
 # ==========================================================
 elif aba == "📊 Relatórios de Rotas":
     st.markdown("<h1>Gestão de Rotas Geradas</h1>", unsafe_allow_html=True)
     dados = buscar_historico()
+    df_locais_ref = buscar_dados()
     
+    # Dicionário auxiliar para recuperar o endereço completo de cada condomínio na impressão na íntegra
+    mapa_enderecos = {}
+    if len(df_locais_ref) > 0:
+        for _, r_loc in df_locais_ref.iterrows():
+            nome_chave = str(r_loc.get("NOME", "")).strip()
+            end_completo = f"{r_loc.get('RUA','')}, {r_loc.get('NUMERO','')}, {r_loc.get('BAIRRO','')}, {r_loc.get('CIDADE','')}/{r_loc.get('ESTADO','')}"
+            mapa_enderecos[nome_chave] = end_completo
+
     if len(dados) == 0: 
         st.info("Nenhuma rota registada.")
     else:
@@ -471,9 +530,8 @@ elif aba == "📊 Relatórios de Rotas":
             
         with t2:
             st.markdown(f"<h3 style='color:{COR_CLARA};'>Cálculos por Seleção</h3>", unsafe_allow_html=True)
-            st.caption("Marque as caixas das rotas que deseja somar.")
+            st.caption("Marque as caixas das rotas que deseja somar e imprimir na íntegra.")
             
-            # Cria um DataFrame limpo apenas com tipos básicos para o data_editor
             df_sel = pd.DataFrame({
                 "SELECIONAR": [False] * len(dados),
                 "DATA": [str(r.get("DATA", "")) for r in dados],
@@ -493,15 +551,15 @@ elif aba == "📊 Relatórios de Rotas":
                 key="editor_soma_rotas_unificado"
             )
             
-            # Extração 100% em Python puro (sem avaliar Series como booleano)
             marcados = edit["SELECIONAR"].tolist() if "SELECIONAR" in edit.columns else []
             rotas_escolhidas = [dados[i] for i, m in enumerate(marcados) if m is True]
             
             if len(rotas_escolhidas) > 0:
                 total_km = 0.0
                 todos_destinos = []
+                html_rotas_integra = ""
                 
-                for row in rotas_escolhidas:
+                for idx_r, row in enumerate(rotas_escolhidas):
                     try:
                         val_str = str(row.get("KM TOTAL", "0")).lower().replace('km', '').replace(',', '.').strip()
                         if val_str:
@@ -509,11 +567,38 @@ elif aba == "📊 Relatórios de Rotas":
                     except:
                         pass
                     
+                    data_r = str(row.get("DATA", ""))
+                    hora_r = str(row.get("HORA", ""))
+                    partida_r = str(row.get("PARTIDA", ""))
+                    km_r = str(row.get("KM TOTAL", ""))
+                    obs_r = str(row.get("OBSERVAÇÕES", ""))
                     pedacos = str(row.get("ROTA", "")).split(" ➔ ")
+                    
+                    # Constrói o bloco na íntegra de cada rota oficial selecionada
+                    html_rotas_integra += f"""
+                    <div style='border: 1px solid {COR_ESCURA}; border-radius: 6px; padding: 12px; margin-bottom: 18px; page-break-inside: avoid;'>
+                        <h4 style='color:{COR_ESCURA}; margin: 0 0 8px 0; border-bottom: 1px solid #ccc; padding-bottom: 4px;'>
+                            ROTA OFICIAL #{idx_r+1} — Data: {data_r} às {hora_r} (Distância: {km_r})
+                        </h4>
+                        <p style='margin: 4px 0; font-size: 14px;'><strong>Ponto de Partida:</strong> {partida_r}</p>
+                        <ol style='margin: 8px 0 8px 20px; padding: 0; font-size: 14px; line-height: 1.5;'>
+                    """
+                    
                     for p in pedacos:
+                        urg_tag = " <strong style='color:red;'>(URGENTE)</strong>" if "🚨" in p else ""
                         p_limpo = p.replace("🚨 ", "").strip()
-                        if p_limpo and p_limpo != "Sede Renove" and p_limpo != str(row.get("PARTIDA", "")):
-                            todos_destinos.append(p_limpo)
+                        if p_limpo:
+                            end_cad = mapa_enderecos.get(p_limpo, "")
+                            end_str = f" — <span style='color:#444;'>{end_cad}</span>" if end_cad else ""
+                            html_rotas_integra += f"<li><strong>{p_limpo}</strong>{urg_tag}{end_str}</li>"
+                            
+                            if p_limpo != "Sede Renove" and p_limpo != partida_r:
+                                todos_destinos.append(p_limpo)
+                                
+                    html_rotas_integra += "</ol>"
+                    if obs_r:
+                        html_rotas_integra += f"<p style='margin: 6px 0 0 0; font-size: 13px; background-color: #f4f6f9; padding: 6px; border-left: 3px solid {COR_CLARA};'><strong>Observações / Tarefas Registradas:</strong> {obs_r}</p>"
+                    html_rotas_integra += "</div>"
                             
                 c_res1, c_res2 = st.columns(2)
                 c_res1.metric("📏 Distância Total do Período", f"{total_km:.1f} km", f"{len(rotas_escolhidas)} rotas somadas")
@@ -526,19 +611,22 @@ elif aba == "📊 Relatórios de Rotas":
                     c_res2.dataframe(contagem, hide_index=True, use_container_width=True)
                     
                     for _, r_cnt in contagem.iterrows():
-                        html_ranking += f"<li>{r_cnt['Condomínio / Local']}: {r_cnt['Visitas']} vez(es)</li>"
+                        html_ranking += f"<li><strong>{r_cnt['Condomínio / Local']}:</strong> {r_cnt['Visitas']} visita(s)</li>"
                 
                 st.markdown("---")
                 
-                html_imp_unificado = f"""<div style='font-family: Arial, sans-serif; font-size:16px; color:#000;'>
-                <h2 style='color:{COR_ESCURA}; border-bottom: 2px solid {COR_CLARA}; padding-bottom:10px;'>RELATÓRIO DE ROTAS UNIFICADO</h2>
-                <p><strong>Rotas Contabilizadas:</strong> {len(rotas_escolhidas)}<br>
-                <strong>Quilometragem Total Somada:</strong> {total_km:.1f} km</p>
-                <hr style='border:1px solid {COR_ESCURA};'>
+                # Documento HTML completo contendo Resumo + Ranking + Rotas Oficiais na Íntegra
+                html_imp_unificado = f"""<div style='font-family: Arial, sans-serif; font-size:15px; color:#000;'>
+                <h2 style='color:{COR_ESCURA}; border-bottom: 2px solid {COR_CLARA}; padding-bottom:8px;'>RELATÓRIO UNIFICADO DE ROTAS OFICIAIS — RENOVE</h2>
+                <div style='background-color:#f9f9f9; border:1px solid #ccc; padding:10px; margin-bottom:15px;'>
+                    <p style='margin:4px 0;'><strong>Total de Rotas Selecionadas:</strong> {len(rotas_escolhidas)}</p>
+                    <p style='margin:4px 0;'><strong>Quilometragem Total Somada:</strong> {total_km:.1f} km</p>
+                </div>
                 """
                 if html_ranking:
-                    html_imp_unificado += f"<h3>Locais mais frequentes:</h3><ul>{html_ranking}</ul>"
-                html_imp_unificado += "</div>"
+                    html_imp_unificado += f"<h3 style='color:{COR_ESCURA}; margin-bottom:6px;'>🏆 Ranking de Locais Visitados</h3><ul style='margin-top:4px;'>{html_ranking}</ul><hr style='border:1px solid {COR_CLARA}; margin: 15px 0;'>"
+                
+                html_imp_unificado += f"<h3 style='color:{COR_ESCURA}; margin-bottom:12px;'>📋 Detalhamento das Rotas Oficiais Selecionadas (Na Íntegra)</h3>{html_rotas_integra}</div>"
                 
                 b64_unificado = base64.b64encode(html_imp_unificado.encode('utf-8')).decode('utf-8')
                 
@@ -557,7 +645,7 @@ elif aba == "📊 Relatórios de Rotas":
                             setTimeout(()=>{{i.contentWindow.print();}}, 500);
                         }}
                         </script>
-                        <button style='width:100%; height:45px; background-color:{COR_CLARA}; color:#ffffff; font-weight:bold; border-radius:8px; border:none; cursor:pointer;' onclick='imp()'>🖨️ IMPRIMIR RELATÓRIO UNIFICADO</button>
+                        <button style='width:100%; height:45px; background-color:{COR_CLARA}; color:#ffffff; font-weight:bold; border-radius:8px; border:none; cursor:pointer;' onclick='imp()'>🖨️ IMPRIMIR RELATÓRIO UNIFICADO (NA ÍNTEGRA)</button>
                     """, height=50)
         
         with t3:
@@ -566,7 +654,6 @@ elif aba == "📊 Relatórios de Rotas":
             
             busca = st.text_input("🔍 Buscar por Local, Condomínio ou Data:").strip().lower()
             
-            # CORREÇÃO PRINCIPAL: Armazena apenas o índice inteiro (int), NUNCA uma Series do Pandas!
             indices_opcoes = []
             textos_opcoes = {}
             for i, r_dict in enumerate(dados):
@@ -630,8 +717,10 @@ elif aba == "📊 Relatórios de Rotas":
                 
                 for idx_loc, loc in enumerate(lista_locais):
                     urg = "(URGENTE)" if "🚨" in loc else ""
-                    nome_limpo = loc.replace("🚨 ", "")
-                    html_imp_hist += f"<p style='margin-bottom:10px; line-height:1.5;'><strong style='color:{COR_ESCURA};'>{idx_loc+1}º - {nome_limpo}</strong> <strong style='color:red;'>{urg}</strong></p>"
+                    nome_limpo = loc.replace("🚨 ", "").strip()
+                    end_cad = mapa_enderecos.get(nome_limpo, "")
+                    end_html = f"<br><span style='font-size:14px; color:#333;'>Endereço: {end_cad}</span>" if end_cad else ""
+                    html_imp_hist += f"<p style='margin-bottom:10px; line-height:1.5;'><strong style='color:{COR_ESCURA};'>{idx_loc+1}º - {nome_limpo}</strong> <strong style='color:red;'>{urg}</strong>{end_html}</p>"
                 
                 if n_obs:
                     html_imp_hist += f"<hr><p style='color:{COR_ESCURA};'><strong>OBSERVAÇÕES DA ROTA:</strong><br>{n_obs}</p>"
@@ -709,3 +798,5 @@ elif aba == "📑 Relatório de Veículos":
             st.warning("A base de dados de veículos está vazia.")
     else:
         st.info("Selecione uma data inicial e uma data final no calendário acima para carregar o relatório.")
+
+```
