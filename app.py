@@ -1,23 +1,3 @@
-As quatro solicitações foram implementadas diretamente na estrutura do sistema:
-
-1. **Nova Tarefa ("PONTO DE PRESENÇA"):** Adicionada à lista suspensa do campo "Tarefa" na tela de criação de diligências.
-
-
-2. **Ponto de Partida Fixo:** O campo "Ponto de Partida" passa a vir preenchido por padrão com **`Rua Rodrigues de Aquino, 267, Centro, CEP 58013030, João Pessoa/PB`**, sendo utilizado automaticamente como origem no cálculo de todas as rotas.
-
-
-3. **Botão de Voltar na Etapa de Ajuste:** Adicionado o botão **"⬅️ Voltar para Etapa Anterior"** ao lado do botão de confirmação na tela de ajuste de sequência, mantendo na memória os locais, tarefas e observações já digitados para que você não precise preencher tudo novamente.
-
-
-4. **Impressão das Rotas na Íntegra ("Gestão de Rotas Geradas"):** O relatório impresso na aba de seleção múltipla agora exibe, além do resumo de quilometragem e do ranking de visitas, o **detalhamento completo na íntegra de cada uma das rotas (datas) selecionadas** (com data, horário, endereço de partida, quilometragem individual, sequência numerada de todas as paradas e observações registradas).
-
----
-
-### Código Completo Atualizado (`app.py`)
-
-Substitua todo o conteúdo do arquivo **`app.py`** no seu GitHub pelo código abaixo:
-
-```python
 import streamlit as st
 import pandas as pd
 import gspread
@@ -326,7 +306,6 @@ elif aba == "🚚 Gerar Intinerário":
             selecionados = []
             
             for i in range(int(qtd)):
-                # Recupera valores preenchidos anteriormente caso o operador tenha clicado em "Voltar"
                 rascunho = st.session_state.rascunho_diligencias[i] if i < len(st.session_state.rascunho_diligencias) else {}
                 idx_local_padrao = lista_nomes_locais.index(rascunho["nome"]) if rascunho.get("nome") in lista_nomes_locais else 0
                 idx_tarefa_padrao = opcoes_tarefas.index(rascunho["missao"]) if rascunho.get("missao") in opcoes_tarefas else 0
@@ -499,7 +478,6 @@ elif aba == "📊 Relatórios de Rotas":
     dados = buscar_historico()
     df_locais_ref = buscar_dados()
     
-    # Dicionário auxiliar para recuperar o endereço completo de cada condomínio na impressão na íntegra
     mapa_enderecos = {}
     if len(df_locais_ref) > 0:
         for _, r_loc in df_locais_ref.iterrows():
@@ -574,7 +552,6 @@ elif aba == "📊 Relatórios de Rotas":
                     obs_r = str(row.get("OBSERVAÇÕES", ""))
                     pedacos = str(row.get("ROTA", "")).split(" ➔ ")
                     
-                    # Constrói o bloco na íntegra de cada rota oficial selecionada
                     html_rotas_integra += f"""
                     <div style='border: 1px solid {COR_ESCURA}; border-radius: 6px; padding: 12px; margin-bottom: 18px; page-break-inside: avoid;'>
                         <h4 style='color:{COR_ESCURA}; margin: 0 0 8px 0; border-bottom: 1px solid #ccc; padding-bottom: 4px;'>
@@ -615,7 +592,6 @@ elif aba == "📊 Relatórios de Rotas":
                 
                 st.markdown("---")
                 
-                # Documento HTML completo contendo Resumo + Ranking + Rotas Oficiais na Íntegra
                 html_imp_unificado = f"""<div style='font-family: Arial, sans-serif; font-size:15px; color:#000;'>
                 <h2 style='color:{COR_ESCURA}; border-bottom: 2px solid {COR_CLARA}; padding-bottom:8px;'>RELATÓRIO UNIFICADO DE ROTAS OFICIAIS — RENOVE</h2>
                 <div style='background-color:#f9f9f9; border:1px solid #ccc; padding:10px; margin-bottom:15px;'>
@@ -798,5 +774,3 @@ elif aba == "📑 Relatório de Veículos":
             st.warning("A base de dados de veículos está vazia.")
     else:
         st.info("Selecione uma data inicial e uma data final no calendário acima para carregar o relatório.")
-
-```
