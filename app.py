@@ -8,7 +8,6 @@ from datetime import datetime
 import pytz
 import streamlit.components.v1 as components
 import base64
-import os
 
 # Configuração de ecrã para ocupar toda a largura
 st.set_page_config(page_title="Rota Inteligente - Renove", layout="wide", page_icon="🏢")
@@ -16,32 +15,23 @@ st.set_page_config(page_title="Rota Inteligente - Renove", layout="wide", page_i
 # ==========================================================
 # ESTILIZAÇÃO VISUAL (CSS) - PALETA RENOVE
 # ==========================================================
-COR_ESCURA = "#313753"  # Azul Marinho da Logo
-COR_CLARA = "#4D648D"   # Azul Aço da Logo
+COR_ESCURA = "#313753"  
+COR_CLARA = "#4D648D"   
 
 st.markdown(f"""
 <style>
-    /* Cores dos Cabeçalhos */
     h1, h2, h3, h4, h5, h6 {{
         color: {COR_ESCURA} !important;
         font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     }}
-    
-    /* Fundo do Menu Lateral */
     [data-testid="stSidebar"] {{
         background-color: #f4f6f9;
         border-right: 2px solid {COR_CLARA};
     }}
-    
-    /* Cor principal de destaque (Métricas, links) */
     a {{ color: {COR_CLARA}; font-weight: bold; }}
     [data-testid="stMetricValue"] {{ color: {COR_ESCURA} !important; }}
-    
-    /* Personalização das Abas (Tabs) */
     .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {{
-        font-size: 16px;
-        font-weight: 600;
-        color: {COR_ESCURA};
+        font-size: 16px; font-weight: 600; color: {COR_ESCURA};
     }}
     .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {{
         border-bottom-color: {COR_CLARA} !important;
@@ -112,10 +102,9 @@ if not st.session_state.logado:
     st.markdown(f"<h1 style='text-align: center; color: {COR_ESCURA};'>🔐 Acesso Restrito</h1>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
-        try:
-            st.image("Renove logo PNG.png", use_container_width=True)
-        except:
-            pass
+        try: st.image("Renove logo PNG.png", use_container_width=True)
+        except: pass
+        
         if st.text_input("Senha", type="password") == "admin123":
             if st.button("Entrar no Sistema", type="primary", use_container_width=True):
                 st.session_state.logado = True
@@ -124,16 +113,13 @@ if not st.session_state.logado:
     st.stop()
 
 # ==========================================================
-# MENU LATERAL - LOGOMARCA E NAVEGAÇÃO
+# MENU LATERAL - NAVEGAÇÃO
 # ==========================================================
 if 'menu_atual' not in st.session_state:
     st.session_state.menu_atual = "📍 Gestão de Locais"
 
-# Inserção da Logomarca no topo do menu lateral
-try:
-    st.sidebar.image("Renove logo PNG.png", use_container_width=True)
-except Exception:
-    st.sidebar.markdown(f"<h2 style='text-align: center; color: {COR_ESCURA};'>RENOVE<br><small style='font-size:12px;'>ADMINISTRADORA</small></h2>", unsafe_allow_html=True)
+try: st.sidebar.image("Renove logo PNG.png", use_container_width=True)
+except Exception: st.sidebar.markdown(f"<h2 style='text-align: center; color: {COR_ESCURA};'>RENOVE</h2>", unsafe_allow_html=True)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown(f"**🧭 MENU DE NAVEGAÇÃO**")
@@ -178,9 +164,11 @@ if aba == "📍 Gestão de Locais":
         
         if termo:
             mask = df_display.apply(lambda row: row.astype(str).str.lower().str.contains(termo).any(), axis=1)
-            df_display = df_display[mask]
+            df_display = df_display.loc[mask]
         
-        df_display.insert(0, "SELECIONAR", False)
+        if "SELECIONAR" not in df_display.columns:
+            df_display.insert(0, "SELECIONAR", False)
+            
         df_editado = st.data_editor(
             df_display, 
             column_config={"SELECIONAR": st.column_config.CheckboxColumn(required=True)}, 
@@ -189,9 +177,12 @@ if aba == "📍 Gestão de Locais":
             use_container_width=True, 
             key="editor_locais"
         )
-        sel = df_editado[df_editado["SELECIONAR"] == True]
         
-        if not sel.empty:
+        # Filtro seguro para evitar erro do Pandas
+        mask_sel = df_editado["SELECIONAR"].fillna(False).astype(bool)
+        sel = df_editado.loc[mask_sel]
+        
+        if len(sel) > 0:
             st.divider()
             if len(sel) == 1:
                 idx = sel.index[0]
@@ -230,7 +221,8 @@ if aba == "📍 Gestão de Locais":
         st.info("Preencha as linhas vazias e clique no botão abaixo para salvar vários locais de uma vez.")
         df_lote = st.data_editor(pd.DataFrame([["", "", "", "", "João Pessoa", "PB"]]*5, columns=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"]), num_rows="dynamic", key=f"lote_{st.session_state.lote_key}")
         if st.button("🚀 Cadastrar Lote em Massa", type="primary"):
-            salvar_dados(pd.concat([df_existente, df_lote[df_lote["NOME"] != ""]], ignore_index=True))
+            df_valido = df_lote[df_lote["NOME"].str.strip() != ""]
+            salvar_dados(pd.concat([df_existente, df_valido], ignore_index=True))
             st.session_state.lote_key += 1
             st.success("Lote salvo com sucesso!")
             st.rerun()
@@ -241,7 +233,8 @@ if aba == "📍 Gestão de Locais":
 elif aba == "🚚 Gerar Intinerário":
     st.markdown("<h1>Cálculo de Rota e Gestão de Urgências</h1>", unsafe_allow_html=True)
     df_locais = buscar_dados()
-    if df_locais.empty: st.warning("Cadastre locais no menu 'Gestão de Locais' primeiro.")
+    if len(df_locais) == 0: 
+        st.warning("Cadastre locais no menu 'Gestão de Locais' primeiro.")
     else:
         if 'etapa_rota' not in st.session_state:
             st.session_state.etapa_rota = 0
@@ -258,7 +251,7 @@ elif aba == "🚚 Gerar Intinerário":
                 m_sel = c2.selectbox("Tarefa", ["ENTREGA DE BOLETOS", "NOTIFICAÇÃO", "RECOLHER ATAS", "DOCUMENTOS", "FOLHA DE PAGAMENTO"], key=f"m_{i}")
                 
                 c3, c4 = st.columns([3, 1])
-                obs = c3.text_input("Observações (Ex: Falar com portaria, deixar na caixa)", key=f"o_{i}")
+                obs = c3.text_input("Observações (Ex: Falar com portaria)", key=f"o_{i}")
                 st.write("") 
                 urg = c4.checkbox("🚨 MARCAR COMO URGENTE", key=f"u_{i}")
                 
@@ -328,7 +321,6 @@ elif aba == "🚚 Gerar Intinerário":
                 fuso = pytz.timezone('America/Fortaleza')
                 agora = datetime.now(fuso)
                 
-                # HTML DE IMPRESSÃO (Com as cores da Renove)
                 html_imp = f"""<div style='font-family: Arial, sans-serif; font-size:16px; color:#000;'>
                 <h2 style='color: {COR_ESCURA}; border-bottom: 2px solid {COR_CLARA}; padding-bottom:10px;'>ITINERÁRIO OFICIAL RENOVE</h2>
                 <p><strong>Data:</strong> {agora.strftime('%d/%m/%Y às %H:%M')}<br>
@@ -351,7 +343,6 @@ elif aba == "🚚 Gerar Intinerário":
                     <strong style='color:{COR_ESCURA};'>{i+1}º - {item['nome']}</strong> {'<strong style="color:red;">(URGENTE)</strong>' if item['urgente'] else ''}<br>
                     <strong>Tarefa:</strong> {item['missao']}<br>
                     <strong>Endereço:</strong> {item['endereco']}"""
-                    
                     if item['obs']:
                         html_imp += f"<br><strong>Observação:</strong> <em>{item['obs']}</em>"
                     html_imp += "</p><hr style='border-top:1px dashed #ccc;'>"
@@ -420,19 +411,38 @@ elif aba == "📊 Relatórios de Rotas":
             st.markdown(f"<h3 style='color:{COR_CLARA};'>Visualização Geral</h3>", unsafe_allow_html=True)
             datas = df['DATA'].unique().tolist()[::-1]
             sel_data = st.selectbox("Filtrar Tabela por Data:", ["Todas as Datas"] + datas)
-            df_v = df if sel_data == "Todas as Datas" else df[df['DATA'] == sel_data]
+            
+            if sel_data == "Todas as Datas":
+                df_v = df.copy()
+            else:
+                df_v = df.loc[df['DATA'] == sel_data]
+                
             st.dataframe(df_v, hide_index=True, use_container_width=True)
             
         with t2:
             st.markdown(f"<h3 style='color:{COR_CLARA};'>Cálculos por Seleção</h3>", unsafe_allow_html=True)
             st.caption("Marque as caixas das rotas que deseja somar.")
             df_sel = df.copy()
-            df_sel.insert(0, "SELECIONAR", False)
+            
+            if "SELECIONAR" not in df_sel.columns:
+                df_sel.insert(0, "SELECIONAR", False)
+                
             edit = st.data_editor(df_sel, hide_index=True, use_container_width=True, disabled=["DATA", "HORA", "PARTIDA", "ROTA", "KM TOTAL", "OBSERVAÇÕES"])
             
-            selecionadas = edit[edit["SELECIONAR"] == True]
-            if not selecionadas.empty:
-                total_km = sum([float(str(k).replace('km','').replace(',','.').strip()) for k in selecionadas["KM TOTAL"] if k])
+            # Filtro 100% Blindado contra o erro do Pandas[cite: 21]
+            mask_selecionadas = edit["SELECIONAR"].fillna(False).astype(bool)
+            selecionadas = edit.loc[mask_selecionadas]
+            
+            if len(selecionadas) > 0:
+                total_km = 0.0
+                # Cálculo blindado que não avalia Pandas Series
+                for _, row in selecionadas.iterrows():
+                    try:
+                        val_str = str(row.get("KM TOTAL", "0")).replace('km', '').replace(',', '.').strip()
+                        if val_str:
+                            total_km += float(val_str)
+                    except:
+                        pass
                 st.metric("📏 Distância Total do Período Selecionado", f"{total_km:.1f} km")
         
         with t3:
@@ -526,8 +536,9 @@ elif aba == "🏍️ Dados do Veículo":
     st.markdown("<h1>Registo Diário da Frota</h1>", unsafe_allow_html=True)
     st.info("Preencha ao final do dia o uso e os gastos.")
     with st.form("veiculo"):
+        fuso = pytz.timezone('America/Fortaleza')
         c1, c2 = st.columns(2)
-        d = c1.date_input("Data do Registo", format="DD/MM/YYYY")
+        d = c1.date_input("Data do Registo", format="DD/MM/YYYY", value=datetime.now(fuso).date())
         km = c2.number_input("Odómetro (KM no painel)", min_value=0)
         
         st.write("---")
@@ -542,25 +553,34 @@ elif aba == "🏍️ Dados do Veículo":
 elif aba == "📑 Relatório de Veículos":
     st.markdown("<h1>Gestão Financeira e de Rodagem</h1>", unsafe_allow_html=True)
     st.markdown(f"<h3 style='color:{COR_CLARA};'>Cruzamento de Custos e Distância</h3>", unsafe_allow_html=True)
-    periodo = st.date_input("Selecione o Período (Início e Fim):", [])
     
-    if len(periodo) == 2:
+    # RESOLVIDO O PROBLEMA DA TELA EM BRANCO: O calendário agora foca automaticamente em hoje!
+    fuso = pytz.timezone('America/Fortaleza')
+    hoje = datetime.now(fuso).date()
+    periodo = st.date_input("Selecione o Período (Início e Fim):", value=(hoje, hoje), format="DD/MM/YYYY")
+    
+    if isinstance(periodo, tuple) and len(periodo) == 2:
         inicio, fim = periodo
         dados_v = buscar_veiculo()
         
         if len(dados_v) > 0:
             df_v = pd.DataFrame(dados_v)
-            df_v['dt'] = pd.to_datetime(df_v['DATA'], format='%d/%m/%Y').dt.date
-            filtrado = df_v[(df_v['dt'] >= inicio) & (df_v['dt'] <= fim)]
+            df_v['dt'] = pd.to_datetime(df_v['DATA'], format='%d/%m/%Y', errors='coerce').dt.date
             
-            c1, c2 = st.columns(2)
-            gasto_total = sum(pd.to_numeric(filtrado['VALOR']))
-            c1.metric("⛽ Gasto em Combustível no Período", f"R$ {gasto_total:.2f}")
-            c2.metric("🗓️ Dias Registados", len(filtrado))
+            mask_v = (df_v['dt'] >= inicio) & (df_v['dt'] <= fim)
+            filtrado = df_v.loc[mask_v]
             
-            st.markdown("#### Tabela de Abastecimentos Diários")
-            st.dataframe(filtrado.drop(columns=['dt']), hide_index=True, use_container_width=True)
+            if len(filtrado) > 0:
+                c1, c2 = st.columns(2)
+                gasto_total = sum(pd.to_numeric(filtrado['VALOR'], errors='coerce').fillna(0))
+                c1.metric("⛽ Gasto em Combustível no Período", f"R$ {gasto_total:.2f}")
+                c2.metric("🗓️ Dias Registados", len(filtrado))
+                
+                st.markdown("#### Tabela de Abastecimentos Diários")
+                st.dataframe(filtrado.drop(columns=['dt']), hide_index=True, use_container_width=True)
+            else:
+                st.warning("Não há registos de veículo para o período selecionado.")
         else:
-            st.warning("Não há informações de veículo para exibir neste período.")
+            st.warning("A base de dados de veículos está vazia.")
     else:
         st.info("Selecione uma data inicial e uma data final no calendário acima para carregar o relatório.")
