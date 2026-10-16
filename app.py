@@ -166,8 +166,10 @@ if aba == "📍 Gestão de Locais":
             mask = df_display.apply(lambda row: row.astype(str).str.lower().str.contains(termo).any(), axis=1)
             df_display = df_display.loc[mask]
         
-        if "SELECIONAR" not in df_display.columns:
-            df_display.insert(0, "SELECIONAR", False)
+        # Garante que a coluna não duplicará
+        if "SELECIONAR" in df_display.columns:
+            df_display = df_display.drop(columns=["SELECIONAR"])
+        df_display.insert(0, "SELECIONAR", False)
             
         df_editado = st.data_editor(
             df_display, 
@@ -178,9 +180,10 @@ if aba == "📍 Gestão de Locais":
             key="editor_locais"
         )
         
-        # Filtro seguro para evitar erro do Pandas
-        mask_sel = df_editado["SELECIONAR"].fillna(False).astype(bool)
-        sel = df_editado.loc[mask_sel]
+        # Filtro 100% blindado contra erros do Pandas
+        lista_selecionados = df_editado["SELECIONAR"].tolist()
+        indices_sel = [i for i, val in enumerate(lista_selecionados) if val in [True, "True", 1]]
+        sel = df_editado.iloc[indices_sel]
         
         if len(sel) > 0:
             st.divider()
@@ -348,7 +351,6 @@ elif aba == "🚚 Gerar Intinerário":
                     html_imp += "</p><hr style='border-top:1px dashed #ccc;'>"
                 
                 html_imp += f"<p style='color:{COR_ESCURA};'><strong>Destino Final:</strong> Sede da Administradora ({dest_final})</p></div>"
-                
                 b64 = base64.b64encode(html_imp.encode('utf-8')).decode('utf-8')
 
                 col_n, col_i = st.columns(2)
@@ -401,7 +403,6 @@ elif aba == "📊 Relatórios de Rotas":
         st.info("Nenhuma rota registada.")
     else:
         df = pd.DataFrame(dados)
-        
         if 'OBSERVAÇÕES' not in df.columns:
             df['OBSERVAÇÕES'] = ""
             
@@ -424,26 +425,82 @@ elif aba == "📊 Relatórios de Rotas":
             st.caption("Marque as caixas das rotas que deseja somar.")
             df_sel = df.copy()
             
-            if "SELECIONAR" not in df_sel.columns:
-                df_sel.insert(0, "SELECIONAR", False)
+            # Limpa colunas duplicadas que causam erro no Pandas[cite: 22]
+            if "SELECIONAR" in df_sel.columns:
+                df_sel = df_sel.drop(columns=["SELECIONAR"])
+            df_sel.insert(0, "SELECIONAR", False)
                 
             edit = st.data_editor(df_sel, hide_index=True, use_container_width=True, disabled=["DATA", "HORA", "PARTIDA", "ROTA", "KM TOTAL", "OBSERVAÇÕES"])
             
-            # Filtro 100% Blindado contra o erro do Pandas[cite: 21]
-            mask_selecionadas = edit["SELECIONAR"].fillna(False).astype(bool)
-            selecionadas = edit.loc[mask_selecionadas]
+            # Extração blindada via lista Python nativa (Resolve o erro "Truth value of a DataFrame is ambiguous")
+            lista_selecionados = edit["SELECIONAR"].tolist()
+            indices_sel = [i for i, val in enumerate(lista_selecionados) if val in [True, "True", 1]]
+            selecionadas = edit.iloc[indices_sel]
             
             if len(selecionadas) > 0:
                 total_km = 0.0
-                # Cálculo blindado que não avalia Pandas Series
+                todos_destinos = []
+                
                 for _, row in selecionadas.iterrows():
                     try:
                         val_str = str(row.get("KM TOTAL", "0")).replace('km', '').replace(',', '.').strip()
                         if val_str:
                             total_km += float(val_str)
-                    except:
-                        pass
-                st.metric("📏 Distância Total do Período Selecionado", f"{total_km:.1f} km")
+                    except: pass
+                    
+                    # Extrai os destinos para o Ranking
+                    pedacos = str(row.get("ROTA", "")).split(" ➔ ")
+                    for p in pedacos:
+                        p_limpo = p.replace("🚨 ", "").strip()
+                        if p_limpo and p_limpo != "Sede Renove" and p_limpo != str(row.get("PARTIDA", "")):
+                            todos_destinos.append(p_limpo)
+                            
+                c_res1, c_res2 = st.columns(2)
+                c_res1.metric("📏 Distância Total do Período", f"{total_km:.1f} km", f"{len(selecionadas)} rotas somadas")
+                
+                # Relatório Unificado e Ranking
+                html_ranking = ""
+                if len(todos_destinos) > 0:
+                    contagem = pd.Series(todos_destinos).value_counts().reset_index()
+                    contagem.columns = ["Condomínio / Local", "Visitas"]
+                    c_res2.markdown("**🏆 Locais mais frequentes:**")
+                    c_res2.dataframe(contagem, hide_index=True, use_container_width=True)
+                    
+                    for _, row in contagem.iterrows():
+                        html_ranking += f"<li>{row['Condomínio / Local']}: {row['Visitas']} vez(es)</li>"
+                
+                st.markdown("---")
+                
+                # Botão de Relatório Unificado
+                html_imp_unificado = f"""<div style='font-family: Arial, sans-serif; font-size:16px; color:#000;'>
+                <h2 style='color:{COR_ESCURA}; border-bottom: 2px solid {COR_CLARA}; padding-bottom:10px;'>RELATÓRIO DE ROTAS UNIFICADO</h2>
+                <p><strong>Rotas Contabilizadas:</strong> {len(selecionadas)}<br>
+                <strong>Quilometragem Total Somada:</strong> {total_km:.1f} km</p>
+                <hr style='border:1px solid {COR_ESCURA};'>
+                """
+                if html_ranking:
+                    html_imp_unificado += f"<h3>Locais mais frequentes:</h3><ul>{html_ranking}</ul>"
+                html_imp_unificado += "</div>"
+                
+                b64_unificado = base64.b64encode(html_imp_unificado.encode('utf-8')).decode('utf-8')
+                
+                col_btn, col_vz = st.columns([1, 2])
+                with col_btn:
+                    components.html(f"""
+                        <script>
+                        function imp(){{
+                            const h=decodeURIComponent(escape(window.atob('{b64_unificado}')));
+                            const i=document.createElement('iframe');
+                            i.style.display='none';
+                            document.body.appendChild(i);
+                            i.contentWindow.document.open();
+                            i.contentWindow.document.write(h);
+                            i.contentWindow.document.close();
+                            setTimeout(()=>{{i.contentWindow.print();}}, 500);
+                        }}
+                        </script>
+                        <button style='width:100%; height:45px; background-color:{COR_CLARA}; color:#ffffff; font-weight:bold; border-radius:8px; border:none; cursor:pointer;' onclick='imp()'>🖨️ IMPRIMIR RELATÓRIO UNIFICADO</button>
+                    """, height=50)
         
         with t3:
             st.markdown(f"<h3 style='color:{COR_CLARA};'>Ferramentas Individuais da Rota</h3>", unsafe_allow_html=True)
@@ -458,7 +515,7 @@ elif aba == "📊 Relatórios de Rotas":
             
             opcoes.reverse()
             
-            if opcoes:
+            if len(opcoes) > 0:
                 sel = st.selectbox("Selecione a rota desejada:", opcoes, format_func=lambda x: x[1])
                 idx_df, resumo, row_dados = sel
                 idx_sheets = idx_df + 2 
@@ -554,7 +611,6 @@ elif aba == "📑 Relatório de Veículos":
     st.markdown("<h1>Gestão Financeira e de Rodagem</h1>", unsafe_allow_html=True)
     st.markdown(f"<h3 style='color:{COR_CLARA};'>Cruzamento de Custos e Distância</h3>", unsafe_allow_html=True)
     
-    # RESOLVIDO O PROBLEMA DA TELA EM BRANCO: O calendário agora foca automaticamente em hoje!
     fuso = pytz.timezone('America/Fortaleza')
     hoje = datetime.now(fuso).date()
     periodo = st.date_input("Selecione o Período (Início e Fim):", value=(hoje, hoje), format="DD/MM/YYYY")
