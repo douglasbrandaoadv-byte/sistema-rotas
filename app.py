@@ -574,7 +574,9 @@ elif aba == "📊 Relatórios de Rotas":
                                 
                     html_rotas_integra += "</ol>"
                     if obs_r:
-                        html_rotas_integra += f"<p style='margin: 6px 0 0 0; font-size: 13px; background-color: #f4f6f9; padding: 6px; border-left: 3px solid {COR_CLARA};'><strong>Observações / Tarefas Registradas:</strong> {obs_r}</p>"
+                        # Substitui e formata cada observação gravada para incluir a Tarefa e o Recado detalhadamente
+                        obs_formatadas = obs_r.replace(" | ", "<br>• ")
+                        html_rotas_integra += f"<div style='margin: 8px 0 0 0; font-size: 13px; background-color: #f4f6f9; padding: 8px; border-left: 3px solid {COR_CLARA};'><strong>Diligências, Tarefas e Observações Registradas:</strong><br>• {obs_formatadas}</div>"
                     html_rotas_integra += "</div>"
                             
                 c_res1, c_res2 = st.columns(2)
@@ -602,7 +604,7 @@ elif aba == "📊 Relatórios de Rotas":
                 if html_ranking:
                     html_imp_unificado += f"<h3 style='color:{COR_ESCURA}; margin-bottom:6px;'>🏆 Ranking de Locais Visitados</h3><ul style='margin-top:4px;'>{html_ranking}</ul><hr style='border:1px solid {COR_CLARA}; margin: 15px 0;'>"
                 
-                html_imp_unificado += f"<h3 style='color:{COR_ESCURA}; margin-bottom:12px;'>📋 Detalhamento das Rotas Oficiais Selecionadas (Na Íntegra)</h3>{html_rotas_integra}</div>"
+                html_imp_unificado += f"<h3 style='color:{COR_ESCURA}; margin-bottom:12px;'>📋 Detalhamento das Rotas Oficiais Selecionadas (Na Íntegra com Tarefas e Observações)</h3>{html_rotas_integra}</div>"
                 
                 b64_unificado = base64.b64encode(html_imp_unificado.encode('utf-8')).decode('utf-8')
                 
