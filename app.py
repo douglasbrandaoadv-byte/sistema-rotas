@@ -9,7 +9,6 @@ import pytz
 import streamlit.components.v1 as components
 import base64
 
-# Configuração de ecrã para ocupar toda a largura
 st.set_page_config(page_title="Rota Inteligente - Renove", layout="wide", page_icon="🏢")
 
 # ==========================================================
@@ -64,11 +63,13 @@ except Exception as e:
     st.error(f"⚠️ Erro ao aceder ao sistema do Google: {e}")
     st.stop()
 
-# --- SISTEMA DE CACHE ---
+# --- SISTEMA DE CACHE SEGURO (USANDO LISTAS E DICIONÁRIOS PUROS) ---
 @st.cache_data(ttl=600, show_spinner=False)
 def buscar_dados():
     try:
         registos = aba_banco.get_all_records()
+        if not registos:
+            return pd.DataFrame(columns=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"])
         df = pd.DataFrame(registos)
         df.columns = df.columns.str.upper() 
         return df
@@ -82,13 +83,51 @@ def salvar_dados(df):
 
 @st.cache_data(ttl=600, show_spinner=False)
 def buscar_historico():
-    try: return aba_historico.get_all_records()
-    except: return []
+    try:
+        valores = aba_historico.get_all_values()
+        if not valores or len(valores) <= 1:
+            return []
+        
+        cabecalho = [str(c).strip().upper() for c in valores[0]]
+        # Garante que a 6ª coluna (OBSERVAÇÕES) exista automaticamente
+        if len(cabecalho) < 6:
+            try:
+                aba_historico.update_acell("F1", "OBSERVAÇÕES")
+            except:
+                pass
+            while len(cabecalho) < 6:
+                cabecalho.append("OBSERVAÇÕES" if len(cabecalho) == 5 else f"COL_{len(cabecalho)+1}")
+        elif cabecalho[5] == "":
+            cabecalho[5] = "OBSERVAÇÕES"
+            try:
+                aba_historico.update_acell("F1", "OBSERVAÇÕES")
+            except:
+                pass
+
+        lista_registos = []
+        for linha in valores[1:]:
+            # Preenche colunas vazias caso a linha tenha menos de 6 itens
+            linha_completa = list(linha) + [""] * (6 - len(linha))
+            registo = {
+                "DATA": str(linha_completa[0]).strip(),
+                "HORA": str(linha_completa[1]).strip(),
+                "PARTIDA": str(linha_completa[2]).strip(),
+                "ROTA": str(linha_completa[3]).strip(),
+                "KM TOTAL": str(linha_completa[4]).strip(),
+                "OBSERVAÇÕES": str(linha_completa[5]).strip()
+            }
+            if any(registo.values()):
+                lista_registos.append(registo)
+        return lista_registos
+    except:
+        return []
 
 @st.cache_data(ttl=600, show_spinner=False)
 def buscar_veiculo():
-    try: return aba_veiculo.get_all_records()
-    except: return []
+    try:
+        return aba_veiculo.get_all_records()
+    except:
+        return []
 
 # --- CONTROLO DE ACESSO ---
 if st.query_params.get("acesso") == "permitido":
@@ -96,14 +135,17 @@ if st.query_params.get("acesso") == "permitido":
 elif 'logado' not in st.session_state:
     st.session_state.logado = False
 
-if 'lote_key' not in st.session_state: st.session_state.lote_key = 0
+if 'lote_key' not in st.session_state:
+    st.session_state.lote_key = 0
 
 if not st.session_state.logado:
     st.markdown(f"<h1 style='text-align: center; color: {COR_ESCURA};'>🔐 Acesso Restrito</h1>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
-        try: st.image("Renove logo PNG.png", use_container_width=True)
-        except: pass
+        try:
+            st.image("Renove logo PNG.png", use_container_width=True)
+        except:
+            pass
         
         if st.text_input("Senha", type="password") == "admin123":
             if st.button("Entrar no Sistema", type="primary", use_container_width=True):
@@ -113,16 +155,18 @@ if not st.session_state.logado:
     st.stop()
 
 # ==========================================================
-# MENU LATERAL - NAVEGAÇÃO
+# MENU LATERAL - NAVEGAÇÃO ACESSÍVEL
 # ==========================================================
 if 'menu_atual' not in st.session_state:
     st.session_state.menu_atual = "📍 Gestão de Locais"
 
-try: st.sidebar.image("Renove logo PNG.png", use_container_width=True)
-except Exception: st.sidebar.markdown(f"<h2 style='text-align: center; color: {COR_ESCURA};'>RENOVE</h2>", unsafe_allow_html=True)
+try:
+    st.sidebar.image("Renove logo PNG.png", use_container_width=True)
+except Exception:
+    st.sidebar.markdown(f"<h2 style='text-align: center; color: {COR_ESCURA};'>RENOVE</h2>", unsafe_allow_html=True)
 
 st.sidebar.markdown("---")
-st.sidebar.markdown(f"**🧭 MENU DE NAVEGAÇÃO**")
+st.sidebar.markdown("**🧭 MENU DE NAVEGAÇÃO**")
 
 opcoes_menu = [
     "📍 Gestão de Locais", 
@@ -162,50 +206,51 @@ if aba == "📍 Gestão de Locais":
         termo = st.text_input("🔍 Digite o nome, rua ou bairro para pesquisar:", "").strip().lower()
         df_display = df_existente.copy()
         
-        if termo:
+        if termo and not df_display.empty:
             mask = df_display.apply(lambda row: row.astype(str).str.lower().str.contains(termo).any(), axis=1)
-            df_display = df_display.loc[mask]
+            df_display = df_display.loc[mask].copy()
         
-        # Garante que a coluna não duplicará
         if "SELECIONAR" in df_display.columns:
             df_display = df_display.drop(columns=["SELECIONAR"])
         df_display.insert(0, "SELECIONAR", False)
             
         df_editado = st.data_editor(
             df_display, 
-            column_config={"SELECIONAR": st.column_config.CheckboxColumn(required=True)}, 
+            column_config={"SELECIONAR": st.column_config.CheckboxColumn("SELECIONAR", default=False)}, 
             disabled=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"], 
             hide_index=True, 
             use_container_width=True, 
             key="editor_locais"
         )
         
-        # Filtro 100% blindado contra erros do Pandas
-        lista_selecionados = df_editado["SELECIONAR"].tolist()
-        indices_sel = [i for i, val in enumerate(lista_selecionados) if val in [True, "True", 1]]
-        sel = df_editado.iloc[indices_sel]
+        lista_selecionados = df_editado["SELECIONAR"].tolist() if "SELECIONAR" in df_editado.columns else []
+        indices_sel = [i for i, val in enumerate(lista_selecionados) if val is True]
         
-        if len(sel) > 0:
+        if len(indices_sel) > 0:
+            indices_originais = [df_display.index[i] for i in indices_sel]
             st.divider()
-            if len(sel) == 1:
-                idx = sel.index[0]
-                d_orig = df_existente.loc[idx]
-                st.subheader(f"✏️ Editando: {d_orig['NOME']}")
+            if len(indices_originais) == 1:
+                idx = indices_originais[0]
+                d_orig = df_existente.loc[idx].to_dict()
+                st.subheader(f"✏️ Editando: {d_orig.get('NOME', '')}")
                 with st.form("form_edita"):
                     c1, c2 = st.columns(2)
-                    n_nome = c1.text_input("NOME DO LOCAL", value=d_orig['NOME'])
-                    n_rua = c2.text_input("RUA", value=d_orig['RUA'])
-                    n_num = c1.text_input("NÚMERO", value=str(d_orig['NUMERO']))
-                    n_bair = c2.text_input("BAIRRO", value=d_orig['BAIRRO'])
-                    n_cid = c1.text_input("CIDADE", value=d_orig['CIDADE'])
-                    n_est = c2.text_input("ESTADO", value=d_orig['ESTADO'])
+                    n_nome = c1.text_input("NOME DO LOCAL", value=str(d_orig.get('NOME', '')))
+                    n_rua = c2.text_input("RUA", value=str(d_orig.get('RUA', '')))
+                    n_num = c1.text_input("NÚMERO", value=str(d_orig.get('NUMERO', '')))
+                    n_bair = c2.text_input("BAIRRO", value=str(d_orig.get('BAIRRO', '')))
+                    n_cid = c1.text_input("CIDADE", value=str(d_orig.get('CIDADE', '')))
+                    n_est = c2.text_input("ESTADO", value=str(d_orig.get('ESTADO', '')))
                     if st.form_submit_button("✅ Salvar Alterações", type="primary"):
                         df_existente.loc[idx] = [n_nome, n_rua, n_num, n_bair, n_cid, n_est]
                         salvar_dados(df_existente)
                         st.success("Informações atualizadas com sucesso!")
                         st.rerun()
-            if st.button("🗑️ Excluir Selecionado(s) Definitivamente", type="secondary"):
-                salvar_dados(df_existente.drop(sel.index.tolist()))
+            else:
+                st.info("⚠️ Para editar, selecione apenas 1 empreendimento por vez.")
+
+            if st.button(f"🗑️ Excluir {len(indices_originais)} Selecionado(s) Definitivamente", type="secondary"):
+                salvar_dados(df_existente.drop(indices_originais))
                 st.rerun()
 
     with tab_novo:
@@ -216,7 +261,7 @@ if aba == "📍 Gestão de Locais":
             nu = c1.text_input("NÚMERO")
             b = c2.text_input("BAIRRO")
             if st.form_submit_button("Guardar Novo Local", type="primary"):
-                salvar_dados(pd.concat([df_existente, pd.DataFrame([[n, r, nu, b, "João Pessoa", "PB"]], columns=df_existente.columns)], ignore_index=True))
+                salvar_dados(pd.concat([df_existente, pd.DataFrame([[n, r, nu, b, "João Pessoa", "PB"]], columns=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"])], ignore_index=True))
                 st.success("Local cadastrado!")
                 st.rerun()
 
@@ -224,7 +269,7 @@ if aba == "📍 Gestão de Locais":
         st.info("Preencha as linhas vazias e clique no botão abaixo para salvar vários locais de uma vez.")
         df_lote = st.data_editor(pd.DataFrame([["", "", "", "", "João Pessoa", "PB"]]*5, columns=["NOME", "RUA", "NUMERO", "BAIRRO", "CIDADE", "ESTADO"]), num_rows="dynamic", key=f"lote_{st.session_state.lote_key}")
         if st.button("🚀 Cadastrar Lote em Massa", type="primary"):
-            df_valido = df_lote[df_lote["NOME"].str.strip() != ""]
+            df_valido = df_lote[df_lote["NOME"].astype(str).str.strip() != ""]
             salvar_dados(pd.concat([df_existente, df_valido], ignore_index=True))
             st.session_state.lote_key += 1
             st.success("Lote salvo com sucesso!")
@@ -244,13 +289,15 @@ elif aba == "🚚 Gerar Intinerário":
             st.session_state.rota_provisoria = []
             st.session_state.historico_salvo = False
 
+        lista_nomes_locais = df_locais['NOME'].astype(str).unique().tolist()
+
         if st.session_state.etapa_rota == 0:
             qtd = st.number_input("Número de diligências hoje:", min_value=1, step=1)
             selecionados = []
             for i in range(int(qtd)):
                 st.markdown(f"<h3 style='color:{COR_CLARA};'>Diligência {i+1}</h3>", unsafe_allow_html=True)
                 c1, c2 = st.columns(2)
-                n_sel = c1.selectbox("Selecione o Local", df_locais['NOME'].unique(), key=f"l_{i}")
+                n_sel = c1.selectbox("Selecione o Local", lista_nomes_locais, key=f"l_{i}")
                 m_sel = c2.selectbox("Tarefa", ["ENTREGA DE BOLETOS", "NOTIFICAÇÃO", "RECOLHER ATAS", "DOCUMENTOS", "FOLHA DE PAGAMENTO"], key=f"m_{i}")
                 
                 c3, c4 = st.columns([3, 1])
@@ -258,9 +305,9 @@ elif aba == "🚚 Gerar Intinerário":
                 st.write("") 
                 urg = c4.checkbox("🚨 MARCAR COMO URGENTE", key=f"u_{i}")
                 
-                r = df_locais[df_locais['NOME'] == n_sel].iloc[0]
-                end = f"{r['RUA']}, {r['NUMERO']}, {r['BAIRRO']}, {r['CIDADE']}, {r['ESTADO']}"
-                selecionados.append({"nome": n_sel, "endereco": end, "missao": m_sel, "obs": obs, "urgente": urg})
+                r = df_locais.loc[df_locais['NOME'].astype(str) == str(n_sel)].iloc[0].to_dict()
+                end = f"{r.get('RUA','')}, {r.get('NUMERO','')}, {r.get('BAIRRO','')}, {r.get('CIDADE','')}, {r.get('ESTADO','')}"
+                selecionados.append({"nome": str(n_sel), "endereco": end, "missao": str(m_sel), "obs": str(obs), "urgente": bool(urg)})
                 st.divider()
 
             st.markdown("### Partida e Geração")
@@ -276,7 +323,8 @@ elif aba == "🚚 Gerar Intinerário":
                         st.session_state.partida = partida
                         st.session_state.etapa_rota = 1
                         st.rerun()
-                    except Exception as e: st.error(f"Erro ao traçar rota: {e}")
+                    except Exception as e:
+                        st.error(f"Erro ao traçar rota: {e}")
 
         elif st.session_state.etapa_rota == 1:
             st.subheader("📋 Etapa de Ajuste")
@@ -390,10 +438,11 @@ elif aba == "🚚 Gerar Intinerário":
                     buscar_historico.clear()
                     st.session_state.historico_salvo = True
                     
-            except Exception as e: st.error(f"Erro no fechamento da rota: {e}")
+            except Exception as e:
+                st.error(f"Erro no fechamento da rota: {e}")
 
 # ==========================================================
-# 📊 RELATÓRIOS DE ROTAS
+# 📊 RELATÓRIOS DE ROTAS (100% LIVRE DE OBJETOS SERIES EM WIDGETS)
 # ==========================================================
 elif aba == "📊 Relatórios de Rotas":
     st.markdown("<h1>Gestão de Rotas Geradas</h1>", unsafe_allow_html=True)
@@ -410,45 +459,56 @@ elif aba == "📊 Relatórios de Rotas":
         
         with t1:
             st.markdown(f"<h3 style='color:{COR_CLARA};'>Visualização Geral</h3>", unsafe_allow_html=True)
-            datas = df['DATA'].unique().tolist()[::-1]
+            datas = df['DATA'].astype(str).unique().tolist()[::-1]
             sel_data = st.selectbox("Filtrar Tabela por Data:", ["Todas as Datas"] + datas)
             
             if sel_data == "Todas as Datas":
                 df_v = df.copy()
             else:
-                df_v = df.loc[df['DATA'] == sel_data]
+                df_v = df.loc[df['DATA'].astype(str) == str(sel_data)].copy()
                 
             st.dataframe(df_v, hide_index=True, use_container_width=True)
             
         with t2:
             st.markdown(f"<h3 style='color:{COR_CLARA};'>Cálculos por Seleção</h3>", unsafe_allow_html=True)
             st.caption("Marque as caixas das rotas que deseja somar.")
-            df_sel = df.copy()
             
-            # Limpa colunas duplicadas que causam erro no Pandas[cite: 22]
-            if "SELECIONAR" in df_sel.columns:
-                df_sel = df_sel.drop(columns=["SELECIONAR"])
-            df_sel.insert(0, "SELECIONAR", False)
+            # Cria um DataFrame limpo apenas com tipos básicos para o data_editor
+            df_sel = pd.DataFrame({
+                "SELECIONAR": [False] * len(dados),
+                "DATA": [str(r.get("DATA", "")) for r in dados],
+                "HORA": [str(r.get("HORA", "")) for r in dados],
+                "PARTIDA": [str(r.get("PARTIDA", "")) for r in dados],
+                "ROTA": [str(r.get("ROTA", "")) for r in dados],
+                "KM TOTAL": [str(r.get("KM TOTAL", "")) for r in dados],
+                "OBSERVAÇÕES": [str(r.get("OBSERVAÇÕES", "")) for r in dados],
+            })
                 
-            edit = st.data_editor(df_sel, hide_index=True, use_container_width=True, disabled=["DATA", "HORA", "PARTIDA", "ROTA", "KM TOTAL", "OBSERVAÇÕES"])
+            edit = st.data_editor(
+                df_sel,
+                column_config={"SELECIONAR": st.column_config.CheckboxColumn("SELECIONAR", default=False)},
+                hide_index=True,
+                use_container_width=True,
+                disabled=["DATA", "HORA", "PARTIDA", "ROTA", "KM TOTAL", "OBSERVAÇÕES"],
+                key="editor_soma_rotas_unificado"
+            )
             
-            # Extração blindada via lista Python nativa (Resolve o erro "Truth value of a DataFrame is ambiguous")
-            lista_selecionados = edit["SELECIONAR"].tolist()
-            indices_sel = [i for i, val in enumerate(lista_selecionados) if val in [True, "True", 1]]
-            selecionadas = edit.iloc[indices_sel]
+            # Extração 100% em Python puro (sem avaliar Series como booleano)
+            marcados = edit["SELECIONAR"].tolist() if "SELECIONAR" in edit.columns else []
+            rotas_escolhidas = [dados[i] for i, m in enumerate(marcados) if m is True]
             
-            if len(selecionadas) > 0:
+            if len(rotas_escolhidas) > 0:
                 total_km = 0.0
                 todos_destinos = []
                 
-                for _, row in selecionadas.iterrows():
+                for row in rotas_escolhidas:
                     try:
-                        val_str = str(row.get("KM TOTAL", "0")).replace('km', '').replace(',', '.').strip()
+                        val_str = str(row.get("KM TOTAL", "0")).lower().replace('km', '').replace(',', '.').strip()
                         if val_str:
                             total_km += float(val_str)
-                    except: pass
+                    except:
+                        pass
                     
-                    # Extrai os destinos para o Ranking
                     pedacos = str(row.get("ROTA", "")).split(" ➔ ")
                     for p in pedacos:
                         p_limpo = p.replace("🚨 ", "").strip()
@@ -456,9 +516,8 @@ elif aba == "📊 Relatórios de Rotas":
                             todos_destinos.append(p_limpo)
                             
                 c_res1, c_res2 = st.columns(2)
-                c_res1.metric("📏 Distância Total do Período", f"{total_km:.1f} km", f"{len(selecionadas)} rotas somadas")
+                c_res1.metric("📏 Distância Total do Período", f"{total_km:.1f} km", f"{len(rotas_escolhidas)} rotas somadas")
                 
-                # Relatório Unificado e Ranking
                 html_ranking = ""
                 if len(todos_destinos) > 0:
                     contagem = pd.Series(todos_destinos).value_counts().reset_index()
@@ -466,15 +525,14 @@ elif aba == "📊 Relatórios de Rotas":
                     c_res2.markdown("**🏆 Locais mais frequentes:**")
                     c_res2.dataframe(contagem, hide_index=True, use_container_width=True)
                     
-                    for _, row in contagem.iterrows():
-                        html_ranking += f"<li>{row['Condomínio / Local']}: {row['Visitas']} vez(es)</li>"
+                    for _, r_cnt in contagem.iterrows():
+                        html_ranking += f"<li>{r_cnt['Condomínio / Local']}: {r_cnt['Visitas']} vez(es)</li>"
                 
                 st.markdown("---")
                 
-                # Botão de Relatório Unificado
                 html_imp_unificado = f"""<div style='font-family: Arial, sans-serif; font-size:16px; color:#000;'>
                 <h2 style='color:{COR_ESCURA}; border-bottom: 2px solid {COR_CLARA}; padding-bottom:10px;'>RELATÓRIO DE ROTAS UNIFICADO</h2>
-                <p><strong>Rotas Contabilizadas:</strong> {len(selecionadas)}<br>
+                <p><strong>Rotas Contabilizadas:</strong> {len(rotas_escolhidas)}<br>
                 <strong>Quilometragem Total Somada:</strong> {total_km:.1f} km</p>
                 <hr style='border:1px solid {COR_ESCURA};'>
                 """
@@ -506,19 +564,30 @@ elif aba == "📊 Relatórios de Rotas":
             st.markdown(f"<h3 style='color:{COR_CLARA};'>Ferramentas Individuais da Rota</h3>", unsafe_allow_html=True)
             st.info("Selecione uma rota específica abaixo para visualizar detalhes, adicionar complementos ou imprimir a folha do percurso.")
             
-            busca = st.text_input("🔍 Buscar por Local, Condomínio ou Data:").lower()
-            opcoes = []
-            for i, r in df.iterrows():
-                resumo = f"Data: {r.get('DATA','')} | {r.get('KM TOTAL','')} | Locais: {str(r.get('ROTA',''))[:50]}..."
-                if busca in str(r.to_dict()).lower():
-                    opcoes.append((i, resumo, r))
+            busca = st.text_input("🔍 Buscar por Local, Condomínio ou Data:").strip().lower()
             
-            opcoes.reverse()
+            # CORREÇÃO PRINCIPAL: Armazena apenas o índice inteiro (int), NUNCA uma Series do Pandas!
+            indices_opcoes = []
+            textos_opcoes = {}
+            for i, r_dict in enumerate(dados):
+                resumo = f"Data: {r_dict.get('DATA','')} às {r_dict.get('HORA','')} | {r_dict.get('KM TOTAL','')} | Locais: {str(r_dict.get('ROTA',''))[:50]}..."
+                texto_completo = f"{r_dict.get('DATA','')} {r_dict.get('ROTA','')} {r_dict.get('OBSERVAÇÕES','')}".lower()
+                if not busca or busca in texto_completo:
+                    indices_opcoes.append(i)
+                    textos_opcoes[i] = resumo
             
-            if len(opcoes) > 0:
-                sel = st.selectbox("Selecione a rota desejada:", opcoes, format_func=lambda x: x[1])
-                idx_df, resumo, row_dados = sel
-                idx_sheets = idx_df + 2 
+            indices_opcoes.reverse()
+            
+            if len(indices_opcoes) > 0:
+                idx_escolhido = st.selectbox(
+                    "Selecione a rota desejada:",
+                    options=indices_opcoes,
+                    format_func=lambda x: textos_opcoes.get(x, str(x)),
+                    key="selectbox_rota_individual"
+                )
+                
+                row_dados = dados[idx_escolhido]
+                idx_sheets = idx_escolhido + 2 
                 
                 st.divider()
                 st.markdown("#### Detalhamento e Edição")
@@ -552,7 +621,7 @@ elif aba == "📊 Relatórios de Rotas":
                 st.markdown("#### Impressão Rápida")
                 lista_locais = str(n_rota).split(" ➔ ")
                 html_imp_hist = f"""<div style='font-family: Arial, sans-serif; font-size:16px; color:#000;'>
-                <h2 style='color:{COR_ESCURA}; border-bottom: 2px solid {COR_CLARA}; padding-bottom:10px;'>ITINERÁRIO (REIMPRESSÃO)</h2>
+                <h2 style='color:{COR_ESCURA}; border-bottom: 2px solid {COR_CLARA}; padding-bottom:10px;'>ITINERÁRIO OFICIAL RENOVE</h2>
                 <p><strong>Data de Referência:</strong> {n_data} às {n_hora}<br>
                 <strong>Partida:</strong> {n_partida}<br>
                 <strong>KM Total:</strong> {n_km}</p>
@@ -624,7 +693,7 @@ elif aba == "📑 Relatório de Veículos":
             df_v['dt'] = pd.to_datetime(df_v['DATA'], format='%d/%m/%Y', errors='coerce').dt.date
             
             mask_v = (df_v['dt'] >= inicio) & (df_v['dt'] <= fim)
-            filtrado = df_v.loc[mask_v]
+            filtrado = df_v.loc[mask_v].copy()
             
             if len(filtrado) > 0:
                 c1, c2 = st.columns(2)
